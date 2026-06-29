@@ -68,8 +68,12 @@ uvicorn panel.main:app --port 8002       # админ-панель
 
 - SSH-спидтест ноды не реализован (есть поля `ssh_*` в модели `Host` под будущую интеграцию
   через `asyncssh`/`paramiko`); сейчас статус серверов считается через HTTP(S)-пинг.
-- Webhook-эндпоинты для CryptoBot/ЮKassa (`webhook_handler` в адаптерах) реализованы как
-  парсеры payload, но сами HTTP-роуты для приёма вебхуков от платёжек нужно добавить в
-  `webapp/api/main.py` под конкретный домен и зарегистрировать в кабинетах платёжек —
-  на старте подтверждение оплаты идёт через polling-кнопку «Я оплатил» в боте.
+- Webhook-эндпоинты для CryptoBot/ЮKassa реализованы в `webapp/api/main.py`:
+  `POST /api/webhooks/cryptobot` (с проверкой подписи `Crypto-Pay-API-Signature`)
+  и `POST /api/webhooks/yookassa`. Зарегистрируйте `https://<домен>/api/webhooks/cryptobot`
+  в `@CryptoBot` → Crypto Pay → My Apps → Webhooks, и `https://<домен>/api/webhooks/yookassa`
+  в личном кабинете ЮKassa. У ЮKassa нет подписи вебхука — безопасность обеспечивается
+  IP-allowlist'ом ЮKassa на уровне Nginx/firewall (см. их документацию за актуальным списком IP).
+  Кнопка «Я оплатил» в боте продолжает работать как запасной вариант (polling) независимо
+  от вебхуков.
 - TON Connect не реализован (см. ТЗ, опциональный пункт).

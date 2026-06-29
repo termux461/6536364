@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from database.db import init_db
-from panel.routes import broadcasts, dashboard, hosts, login, menu, payments, tariffs, tickets
+from panel.routes import broadcasts, dashboard, hosts, login, menu, payments, tariffs, tickets, withdrawals
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -31,3 +31,4 @@ app.include_router(payments.router)
 app.include_router(tickets.router)
 app.include_router(broadcasts.router)
 app.include_router(menu.router)
+app.include_router(withdrawals.router)

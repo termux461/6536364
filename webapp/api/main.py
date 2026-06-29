@@ -1,17 +1,23 @@
+import hashlib
+import hmac
 import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.i18n import t
+from bot.services.fulfillment import fulfil_payment
+from bot.services.payments.cryptobot import CryptoBotProvider
+from bot.services.payments.yookassa import YooKassaProvider
 from config import settings
 from database.db import async_session, init_db
-from database.models import SenderType, Ticket, TicketMessage, TicketStatus, User
+from database.models import Payment, PaymentStatus, SenderType, Ticket, TicketMessage, TicketStatus, User
 from webapp.security import validate_init_data
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
@@ -69,6 +75,22 @@ async def notify_admins_new_ticket(ticket: Ticket, first_message: str) -> None:
                 )
             except httpx.HTTPError:
                 pass
+
+
+async def notify_user_payment_success(payment: Payment, user: User, sub) -> None:
+    text = t(user.locale, "buy.payment_success") + "\n\n" + t(
+        user.locale, "buy.config_caption",
+        expires=sub.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+        url=sub.subscription_url or "—",
+    )
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            await client.post(
+                f"https://api.telegram.org/bot{settings.BOT_TOKEN}/sendMessage",
+                json={"chat_id": user.tg_id, "text": text},
+            )
+        except httpx.HTTPError:
+            pass
 
 
 def _serialize_message(m: TicketMessage) -> dict:
@@ -166,3 +188,54 @@ async def add_message(
 
     await notify_admins_new_ticket(ticket, message)
     return _serialize_message(msg)
+
+
+async def _process_paid_webhook(external_id: str, provider_code: str) -> None:
+    async with async_session() as session:
+        payment = (
+            await session.execute(
+                select(Payment).where(Payment.external_id == external_id, Payment.provider == provider_code)
+            )
+        ).scalar_one_or_none()
+        if not payment or payment.status == PaymentStatus.PAID:
+            return
+        sub = await fulfil_payment(session, payment)
+        user = (await session.execute(select(User).where(User.id == payment.user_id))).scalar_one()
+        await notify_user_payment_success(payment, user, sub)
+
+
+@app.post("/api/webhooks/cryptobot")
+async def cryptobot_webhook(request: Request) -> dict:
+    if not settings.CRYPTOBOT_API_TOKEN:
+        raise HTTPException(status_code=404, detail="Not configured")
+
+    body = await request.body()
+    signature = request.headers.get("Crypto-Pay-API-Signature", "")
+    secret = hashlib.sha256(settings.CRYPTOBOT_API_TOKEN.encode()).digest()
+    expected = hmac.new(secret, body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    data = await request.json()
+    provider = CryptoBotProvider(settings.CRYPTOBOT_API_TOKEN, settings.CRYPTOBOT_API_URL)
+    result = await provider.webhook_handler(data)
+    if result:
+        external_id, is_paid = result
+        if is_paid:
+            await _process_paid_webhook(external_id, "cryptobot")
+    return {"ok": True}
+
+
+@app.post("/api/webhooks/yookassa")
+async def yookassa_webhook(request: Request) -> dict:
+    if not (settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY):
+        raise HTTPException(status_code=404, detail="Not configured")
+
+    data = await request.json()
+    provider = YooKassaProvider(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY)
+    result = await provider.webhook_handler(data)
+    if result:
+        external_id, is_paid = result
+        if is_paid:
+            await _process_paid_webhook(external_id, "yookassa")
+    return {"ok": True}

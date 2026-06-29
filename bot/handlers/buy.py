@@ -7,11 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.filters import MenuAction
 from bot.i18n import t
 from bot.keyboards.buy import check_payment_keyboard, payment_methods_keyboard, tariffs_keyboard
+from bot.services.fulfillment import fulfil_payment
 from bot.services.payments.registry import build_provider, ensure_payment_methods_seeded, get_enabled_methods
-from bot.services.referral import accrue_referral_bonus
-from bot.services.remnawave import RemnawaveClient
 from bot.states import BuyFlow
-from database.models import Host, Payment, PaymentStatus, Subscription, SubscriptionStatus, Tariff, User
+from database.models import Payment, PaymentStatus, Tariff, User
 
 router = Router(name="buy")
 
@@ -84,42 +83,6 @@ async def choose_payment(callback: CallbackQuery, session: AsyncSession, locale:
         await callback.message.answer(t(locale, "buy.invoice_created"), reply_markup=kb)
     await callback.message.answer(t(locale, "buy.check_payment"), reply_markup=check_payment_keyboard(payment.id, locale))
     await callback.answer()
-
-
-async def fulfil_payment(session: AsyncSession, payment: Payment) -> Subscription:
-    import datetime
-
-    tariff = (await session.execute(select(Tariff).where(Tariff.id == payment.tariff_id))).scalar_one()
-    host = (await session.execute(select(Host).where(Host.id == tariff.host_id))).scalar_one()
-    user = (await session.execute(select(User).where(User.id == payment.user_id))).scalar_one()
-
-    expires_at = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=tariff.duration_days)
-    client = RemnawaveClient(host.api_url, host.api_token)
-    try:
-        data = await client.create_user(
-            telegram_id=user.tg_id,
-            username=user.username or "",
-            expire_at_iso=expires_at.isoformat(),
-            traffic_limit_bytes=tariff.traffic_limit_gb * 1024 ** 3,
-        )
-    finally:
-        await client.close()
-
-    sub = Subscription(
-        user_id=user.id, tariff_id=tariff.id, host_id=host.id,
-        remnawave_uuid=data.get("uuid") or data.get("id"),
-        subscription_url=data.get("subscriptionUrl") or data.get("subscription_url"),
-        status=SubscriptionStatus.ACTIVE, expires_at=expires_at,
-    )
-    session.add(sub)
-    payment.status = PaymentStatus.PAID
-    import datetime as dt
-    payment.paid_at = dt.datetime.now(dt.timezone.utc)
-    await session.commit()
-    await session.refresh(sub)
-
-    await accrue_referral_bonus(session, payment)
-    return sub
 
 
 @router.callback_query(F.data.startswith("check_pay:"))

@@ -3,7 +3,7 @@ from aiogram.types import Message, PreCheckoutQuery
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.handlers.buy import fulfil_payment
+from bot.services.fulfillment import fulfil_payment
 from bot.i18n import t
 from database.models import Payment, PaymentStatus
 
