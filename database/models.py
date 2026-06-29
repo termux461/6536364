@@ -154,17 +154,30 @@ class TicketStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
+class TicketCategory(Base):
+    """Admin-configurable ticket topics offered to users in the support Mini App."""
+    __tablename__ = "ticket_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title_ru: Mapped[str] = mapped_column(String(64))
+    title_en: Mapped[str] = mapped_column(String(64))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class Ticket(Base):
     __tablename__ = "tickets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("ticket_categories.id", ondelete="SET NULL"), nullable=True)
     subject: Mapped[str] = mapped_column(String(255))
     status: Mapped[TicketStatus] = mapped_column(Enum(TicketStatus), default=TicketStatus.OPEN)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship(back_populates="tickets")
+    category: Mapped["TicketCategory"] = relationship()
     messages: Mapped[list["TicketMessage"]] = relationship(back_populates="ticket", order_by="TicketMessage.created_at")
 
 

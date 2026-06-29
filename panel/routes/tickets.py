@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from config import settings
 from database.models import SenderType, Ticket, TicketMessage, TicketStatus, User
@@ -14,7 +15,9 @@ router = APIRouter()
 
 @router.get("/panel/tickets")
 async def list_tickets(request: Request, session: AsyncSession = Depends(get_session), _: bool = Depends(require_admin)):
-    tickets = (await session.execute(select(Ticket).order_by(Ticket.updated_at.desc()))).scalars().all()
+    tickets = (
+        await session.execute(select(Ticket).options(selectinload(Ticket.category)).order_by(Ticket.updated_at.desc()))
+    ).scalars().all()
     return templates.TemplateResponse("tickets.html", {"request": request, "tickets": tickets})
 
 
@@ -22,7 +25,9 @@ async def list_tickets(request: Request, session: AsyncSession = Depends(get_ses
 async def ticket_detail(
     ticket_id: int, request: Request, session: AsyncSession = Depends(get_session), _: bool = Depends(require_admin),
 ):
-    ticket = (await session.execute(select(Ticket).where(Ticket.id == ticket_id))).scalar_one_or_none()
+    ticket = (
+        await session.execute(select(Ticket).options(selectinload(Ticket.category)).where(Ticket.id == ticket_id))
+    ).scalar_one_or_none()
     messages = (
         await session.execute(select(TicketMessage).where(TicketMessage.ticket_id == ticket_id).order_by(TicketMessage.created_at))
     ).scalars().all()

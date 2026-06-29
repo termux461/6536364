@@ -10,14 +10,21 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from bot.i18n import t
+from bot.services.app_settings import get_appearance
 from bot.services.fulfillment import fulfil_payment
 from bot.services.payments.cryptobot import CryptoBotProvider
 from bot.services.payments.yookassa import YooKassaProvider
+from bot.services.referral import referral_stats
+from bot.services.support import ensure_categories_seeded
 from config import settings
 from database.db import async_session, init_db
-from database.models import Payment, PaymentStatus, SenderType, Ticket, TicketMessage, TicketStatus, User
+from database.models import (
+    Payment, PaymentStatus, SenderType, Subscription, SubscriptionStatus,
+    Ticket, TicketCategory, TicketMessage, TicketStatus, User,
+)
 from webapp.security import validate_init_data
 
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
@@ -93,6 +100,52 @@ async def notify_user_payment_success(payment: Payment, user: User, sub) -> None
             pass
 
 
+@app.get("/api/config")
+async def get_config(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)) -> dict:
+    appearance = await get_appearance(session)
+    await ensure_categories_seeded(session)
+    categories = (
+        await session.execute(select(TicketCategory).where(TicketCategory.is_active.is_(True)).order_by(TicketCategory.sort_order))
+    ).scalars().all()
+    return {
+        "locale": user.locale,
+        "brand_name": appearance["webapp_brand_name"],
+        "accent_color": appearance["webapp_accent_color"],
+        "logo_url": appearance["webapp_logo_url"] or None,
+        "categories": [
+            {"id": c.id, "title": c.title_ru if user.locale == "ru" else c.title_en}
+            for c in categories
+        ],
+    }
+
+
+@app.get("/api/me")
+async def get_me(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)) -> dict:
+    sub = (
+        await session.execute(
+            select(Subscription)
+            .options(selectinload(Subscription.tariff))
+            .where(Subscription.user_id == user.id, Subscription.status == SubscriptionStatus.ACTIVE)
+            .order_by(Subscription.expires_at.desc())
+        )
+    ).scalars().first()
+    stats = await referral_stats(session, user)
+    return {
+        "tg_id": user.tg_id,
+        "username": user.username,
+        "full_name": user.full_name,
+        "locale": user.locale,
+        "balance": stats["balance"],
+        "referral_count": stats["count"],
+        "referral_earned": stats["earned"],
+        "subscription": {
+            "tariff_name": sub.tariff.name if sub else None,
+            "expires_at": sub.expires_at.isoformat() if sub else None,
+            "subscription_url": sub.subscription_url if sub else None,
+        } if sub else None,
+    }
+
+
 def _serialize_message(m: TicketMessage) -> dict:
     return {
         "id": m.id,
@@ -104,9 +157,14 @@ def _serialize_message(m: TicketMessage) -> dict:
     }
 
 
-def _serialize_ticket(t: Ticket, messages: list[TicketMessage] | None = None) -> dict:
-    data = {"id": t.id, "subject": t.subject, "status": t.status.value, "created_at": t.created_at.isoformat(),
-            "updated_at": t.updated_at.isoformat()}
+def _serialize_ticket(t: Ticket, locale: str, messages: list[TicketMessage] | None = None) -> dict:
+    category = None
+    if t.category:
+        category = t.category.title_ru if locale == "ru" else t.category.title_en
+    data = {
+        "id": t.id, "subject": t.subject, "status": t.status.value, "category": category,
+        "created_at": t.created_at.isoformat(), "updated_at": t.updated_at.isoformat(),
+    }
     if messages is not None:
         data["messages"] = [_serialize_message(m) for m in messages]
     return data
@@ -115,20 +173,28 @@ def _serialize_ticket(t: Ticket, messages: list[TicketMessage] | None = None) ->
 @app.get("/api/tickets")
 async def list_tickets(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)) -> list[dict]:
     tickets = (
-        await session.execute(select(Ticket).where(Ticket.user_id == user.id).order_by(Ticket.updated_at.desc()))
+        await session.execute(
+            select(Ticket).options(selectinload(Ticket.category))
+            .where(Ticket.user_id == user.id).order_by(Ticket.updated_at.desc())
+        )
     ).scalars().all()
-    return [_serialize_ticket(t) for t in tickets]
+    return [_serialize_ticket(t, user.locale) for t in tickets]
 
 
 @app.get("/api/tickets/{ticket_id}")
 async def get_ticket(ticket_id: int, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)) -> dict:
-    ticket = (await session.execute(select(Ticket).where(Ticket.id == ticket_id, Ticket.user_id == user.id))).scalar_one_or_none()
+    ticket = (
+        await session.execute(
+            select(Ticket).options(selectinload(Ticket.category))
+            .where(Ticket.id == ticket_id, Ticket.user_id == user.id)
+        )
+    ).scalar_one_or_none()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
     messages = (
         await session.execute(select(TicketMessage).where(TicketMessage.ticket_id == ticket.id).order_by(TicketMessage.created_at))
     ).scalars().all()
-    return _serialize_ticket(ticket, messages)
+    return _serialize_ticket(ticket, user.locale, messages)
 
 
 async def _save_attachment(file: UploadFile | None) -> tuple[str | None, str | None]:
@@ -147,11 +213,12 @@ async def _save_attachment(file: UploadFile | None) -> tuple[str | None, str | N
 async def create_ticket(
     subject: str = Form(...),
     message: str = Form(...),
+    category_id: int | None = Form(None),
     file: UploadFile | None = None,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    ticket = Ticket(user_id=user.id, subject=subject[:255], status=TicketStatus.OPEN)
+    ticket = Ticket(user_id=user.id, subject=subject[:255], category_id=category_id, status=TicketStatus.OPEN)
     session.add(ticket)
     await session.flush()
 
@@ -160,10 +227,10 @@ async def create_ticket(
                          attachment_path=attachment_path, attachment_type=attachment_type)
     session.add(msg)
     await session.commit()
-    await session.refresh(ticket)
+    await session.refresh(ticket, attribute_names=["category"])
 
     await notify_admins_new_ticket(ticket, message)
-    return _serialize_ticket(ticket, [msg])
+    return _serialize_ticket(ticket, user.locale, [msg])
 
 
 @app.post("/api/tickets/{ticket_id}/messages")

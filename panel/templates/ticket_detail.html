@@ -2,7 +2,7 @@
 {% block title %}Тикет #{{ ticket.id }}{% endblock %}
 {% block content %}
 <h1>Тикет #{{ ticket.id }}: {{ ticket.subject }}</h1>
-<p>Статус: <span class="badge">{{ ticket.status.value }}</span></p>
+<p>Статус: <span class="badge">{{ ticket.status.value }}</span>{% if ticket.category %} · Категория: {{ ticket.category.title_ru }}{% endif %}</p>
 
 <div class="card">
   {% for m in messages %}

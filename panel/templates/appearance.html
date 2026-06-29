@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Внешний вид Mini App{% endblock %}
+{% block content %}
+<h1>Внешний вид Mini App поддержки</h1>
+<p>Название, акцентный цвет и логотип, которые видит пользователь в Mini App.</p>
+<div class="card">
+  <form method="post" action="/panel/appearance">
+    <label>Название бренда</label>
+    <input type="text" name="brand_name" value="{{ appearance.webapp_brand_name }}">
+    <label>Акцентный цвет (HEX)</label>
+    <input type="text" name="accent_color" value="{{ appearance.webapp_accent_color }}" placeholder="#2481cc">
+    <label>URL логотипа (необязательно)</label>
+    <input type="text" name="logo_url" value="{{ appearance.webapp_logo_url }}" placeholder="https://...">
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+{% endblock %}
