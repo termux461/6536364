@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Тикеты{% endblock %}
+{% block content %}
+<h1>Тикеты поддержки</h1>
+<table>
+<tr><th>#</th><th>Тема</th><th>Статус</th><th>Обновлён</th><th></th></tr>
+{% for t in tickets %}
+<tr>
+  <td>{{ t.id }}</td>
+  <td>{{ t.subject }}</td>
+  <td><span class="badge {{ 'on' if t.status.value == 'open' else 'off' if t.status.value == 'closed' else '' }}">{{ t.status.value }}</span></td>
+  <td>{{ t.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+  <td><a class="btn" href="/panel/tickets/{{ t.id }}">Открыть</a></td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

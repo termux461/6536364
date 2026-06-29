@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Платёжные методы{% endblock %}
+{% block content %}
+<h1>Платёжные методы</h1>
+<p>Отключённые методы не показываются пользователям при оплате.</p>
+<table>
+<tr><th>Метод</th><th>Статус</th><th>Действие</th></tr>
+{% for m in methods %}
+<tr>
+  <td>{{ m.title }}</td>
+  <td><span class="badge {{ 'on' if m.is_enabled else 'off' }}">{{ 'включён' if m.is_enabled else 'отключён' }}</span></td>
+  <td>
+    <form method="post" action="/panel/payments/{{ m.code }}/toggle">
+      <button class="secondary" type="submit">{{ 'Отключить' if m.is_enabled else 'Включить' }}</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>{% block title %}Админ-панель{% endblock %}</title>
+<link rel="stylesheet" href="/panel/static/css/style.css">
+</head>
+<body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="brand">VPN Bot</div>
+    <a href="/panel/dashboard">📊 Дашборд</a>
+    <a href="/panel/hosts">🖥 Хосты</a>
+    <a href="/panel/tariffs">📦 Тарифы</a>
+    <a href="/panel/payments">💳 Платёжки</a>
+    <a href="/panel/tickets">🎫 Тикеты</a>
+    <a href="/panel/broadcasts">📢 Рассылки</a>
+    <a href="/panel/menu">🧩 Меню бота</a>
+    <a href="/panel/logout">🚪 Выйти</a>
+  </nav>
+  <main class="content">
+    {% if message %}<div class="flash">{{ message }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>
