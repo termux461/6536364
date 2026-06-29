@@ -7,6 +7,7 @@ from bot.db.base import async_session
 from bot.keyboards.user import main_menu, support_menu, to_menu_keyboard
 from bot.models.support import SupportMessage
 from bot.services.users import get_or_create_user
+from bot.utils.helpers import is_admin_async
 from bot.utils.states import Support
 
 router = Router(name="user_support")
@@ -50,4 +51,5 @@ async def msg_support_text(message: Message, state: FSMContext) -> None:
         except Exception:
             pass
 
-    await message.answer("Главное меню:", reply_markup=main_menu(message.from_user.id))
+    is_admin = await is_admin_async(message.from_user.id)
+    await message.answer("Главное меню:", reply_markup=main_menu(is_admin))

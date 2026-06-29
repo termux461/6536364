@@ -7,12 +7,12 @@ from aiogram.types import CallbackQuery, Message
 from bot.db.base import async_session
 from bot.keyboards.admin import admin_back_menu, admin_user_card_menu, admin_users_menu
 from bot.services.users import get_user_by_tg_id
-from bot.utils.helpers import is_admin
-from bot.utils.states import AdminBalance, AdminFindUser
+from bot.utils.helpers import admin_filter
+from bot.utils.states import AdminBalance, AdminFindUser, AdminMessageUser
 
 router = Router(name="admin_users")
-router.message.filter(lambda message: is_admin(message.from_user.id))
-router.callback_query.filter(lambda callback: is_admin(callback.from_user.id))
+router.message.filter(admin_filter)
+router.callback_query.filter(admin_filter)
 
 
 def _user_card_text(user) -> str:
@@ -55,6 +55,27 @@ async def msg_admin_find_user(message: Message, state: FSMContext) -> None:
         return
 
     await message.answer(_user_card_text(user), reply_markup=admin_user_card_menu(user.tg_id, user.is_blocked))
+
+
+@router.callback_query(F.data.startswith("admin:user:message:"))
+async def cb_admin_user_message(callback: CallbackQuery, state: FSMContext) -> None:
+    tg_id = int(callback.data.split(":")[3])
+    await state.set_state(AdminMessageUser.waiting_text)
+    await state.update_data(tg_id=tg_id)
+    await callback.message.edit_text(f"Введите сообщение для пользователя {tg_id}:", reply_markup=admin_back_menu("admin:users"))
+    await callback.answer()
+
+
+@router.message(AdminMessageUser.waiting_text)
+async def msg_admin_user_message(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    tg_id = data.get("tg_id")
+    await state.clear()
+    try:
+        await message.bot.send_message(tg_id, f"Сообщение от поддержки МАМОНТ ВПН:\n\n{message.text}")
+        await message.answer("Сообщение отправлено.", reply_markup=admin_back_menu("admin:users"))
+    except Exception as exc:
+        await message.answer(f"Не удалось отправить сообщение: {exc}", reply_markup=admin_back_menu("admin:users"))
 
 
 @router.callback_query(F.data.startswith("admin:user:toggleblock:"))

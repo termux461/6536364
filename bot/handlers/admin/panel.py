@@ -3,11 +3,11 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from bot.keyboards.admin import admin_main_menu
-from bot.utils.helpers import is_admin
+from bot.utils.helpers import admin_filter
 
 router = Router(name="admin_panel")
-router.message.filter(lambda message: is_admin(message.from_user.id))
-router.callback_query.filter(lambda callback: is_admin(callback.from_user.id))
+router.message.filter(admin_filter)
+router.callback_query.filter(admin_filter)
 
 ADMIN_TEXT = "Админ-панель МАМОНТ ВПН"
 

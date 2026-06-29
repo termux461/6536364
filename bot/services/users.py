@@ -5,11 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.models.user import User
 
 
-async def get_or_create_user(session: AsyncSession, tg_user: TgUser) -> User:
+async def get_or_create_user(session: AsyncSession, tg_user: TgUser, ref_by_tg_id: int | None = None) -> User:
     result = await session.execute(select(User).where(User.tg_id == tg_user.id))
     user = result.scalar_one_or_none()
     if user is None:
-        user = User(tg_id=tg_user.id, username=tg_user.username, first_name=tg_user.first_name)
+        ref_by = None
+        if ref_by_tg_id and ref_by_tg_id != tg_user.id:
+            referrer = await get_user_by_tg_id(session, ref_by_tg_id)
+            if referrer is not None:
+                ref_by = referrer.id
+        user = User(tg_id=tg_user.id, username=tg_user.username, first_name=tg_user.first_name, ref_by=ref_by)
         session.add(user)
         await session.commit()
         await session.refresh(user)

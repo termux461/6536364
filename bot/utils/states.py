@@ -12,7 +12,8 @@ class Support(StatesGroup):
 
 
 class AdminBroadcast(StatesGroup):
-    waiting_text = State()
+    waiting_filter = State()
+    waiting_content = State()
     confirm = State()
 
 
@@ -21,7 +22,14 @@ class AdminAddServer(StatesGroup):
     country = State()
     flag = State()
     protocol = State()
-    endpoint = State()
+    ssh_host = State()
+    ssh_port = State()
+    ssh_user = State()
+    ssh_password = State()
+    wg_port = State()
+    api_password = State()
+    confirm = State()
+    installing = State()
 
 
 class AdminFindUser(StatesGroup):
@@ -30,3 +38,29 @@ class AdminFindUser(StatesGroup):
 
 class AdminBalance(StatesGroup):
     waiting_amount = State()
+
+
+class AdminMessageUser(StatesGroup):
+    waiting_text = State()
+
+
+class AdminIssueKey(StatesGroup):
+    waiting_tg_id = State()
+    choosing_plan = State()
+    choosing_server = State()
+    confirm = State()
+
+
+class AdminPromo(StatesGroup):
+    code = State()
+    discount = State()
+    limit = State()
+    expires = State()
+
+
+class AdminAdmins(StatesGroup):
+    waiting_tg_id = State()
+
+
+class AdminRestore(StatesGroup):
+    waiting_file = State()

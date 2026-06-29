@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
@@ -6,53 +7,101 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
 from bot.db.base import async_session
-from bot.keyboards.admin import admin_back_menu, admin_broadcast_confirm_menu
+from bot.keyboards.admin import admin_back_menu, admin_broadcast_confirm_menu, admin_broadcast_filters_menu
+from bot.models.subscription import Subscription
 from bot.models.user import User
-from bot.utils.helpers import is_admin
+from bot.utils.helpers import admin_filter
 from bot.utils.states import AdminBroadcast
 
 router = Router(name="admin_broadcast")
-router.message.filter(lambda message: is_admin(message.from_user.id))
-router.callback_query.filter(lambda callback: is_admin(callback.from_user.id))
+router.message.filter(admin_filter)
+router.callback_query.filter(admin_filter)
 
 
 @router.callback_query(F.data == "admin:broadcast")
 async def cb_broadcast_start(callback: CallbackQuery, state: FSMContext) -> None:
-    await state.set_state(AdminBroadcast.waiting_text)
-    await callback.message.edit_text("Введите текст рассылки:", reply_markup=admin_back_menu())
+    await state.set_state(AdminBroadcast.waiting_filter)
+    await callback.message.edit_text("Выберите аудиторию рассылки:", reply_markup=admin_broadcast_filters_menu())
     await callback.answer()
 
 
-@router.message(AdminBroadcast.waiting_text)
-async def msg_broadcast_text(message: Message, state: FSMContext) -> None:
-    await state.update_data(text=message.text)
-    await state.set_state(AdminBroadcast.confirm)
-    await message.answer(
-        f"Предпросмотр рассылки:\n\n{message.text}\n\nОтправить всем пользователям?",
-        reply_markup=admin_broadcast_confirm_menu(),
+@router.callback_query(AdminBroadcast.waiting_filter, F.data.startswith("admin:broadcast:filter:"))
+async def cb_broadcast_filter(callback: CallbackQuery, state: FSMContext) -> None:
+    audience = callback.data.split(":")[3]
+    await state.update_data(audience=audience)
+    await state.set_state(AdminBroadcast.waiting_content)
+    await callback.message.edit_text(
+        "Отправьте текст рассылки (можно с фото/видео — приложите медиа с подписью):",
+        reply_markup=admin_back_menu(),
     )
+    await callback.answer()
+
+
+@router.message(AdminBroadcast.waiting_content)
+async def msg_broadcast_content(message: Message, state: FSMContext) -> None:
+    content: dict = {"text": message.html_text or message.caption or ""}
+    if message.photo:
+        content["photo"] = message.photo[-1].file_id
+    elif message.video:
+        content["video"] = message.video.file_id
+
+    await state.update_data(content=content)
+    await state.set_state(AdminBroadcast.confirm)
+
+    if message.photo:
+        await message.answer_photo(content["photo"], caption=content["text"])
+    elif message.video:
+        await message.answer_video(content["video"], caption=content["text"])
+    else:
+        await message.answer(content["text"])
+
+    await message.answer("Отправить эту рассылку?", reply_markup=admin_broadcast_confirm_menu())
+
+
+async def _get_audience_tg_ids(audience: str) -> list[int]:
+    async with async_session() as session:
+        if audience == "active":
+            result = await session.execute(
+                select(User.tg_id)
+                .join(Subscription, Subscription.user_id == User.id)
+                .where(User.is_blocked.is_(False), Subscription.active.is_(True), Subscription.expires_at > datetime.utcnow())
+                .distinct()
+            )
+        elif audience == "expired":
+            result = await session.execute(
+                select(User.tg_id)
+                .join(Subscription, Subscription.user_id == User.id)
+                .where(User.is_blocked.is_(False), (Subscription.active.is_(False)) | (Subscription.expires_at <= datetime.utcnow()))
+                .distinct()
+            )
+        else:
+            result = await session.execute(select(User.tg_id).where(User.is_blocked.is_(False)))
+        return [row[0] for row in result.all()]
 
 
 @router.callback_query(F.data == "admin:broadcast:send")
 async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
-    text = data.get("text")
+    content = data.get("content")
+    audience = data.get("audience", "all")
     await state.clear()
 
-    if not text:
-        await callback.answer("Текст рассылки не найден", show_alert=True)
+    if not content:
+        await callback.answer("Контент рассылки не найден", show_alert=True)
         return
 
-    async with async_session() as session:
-        result = await session.execute(select(User.tg_id).where(User.is_blocked.is_(False)))
-        tg_ids = [row[0] for row in result.all()]
-
+    tg_ids = await _get_audience_tg_ids(audience)
     await callback.message.edit_text(f"Рассылка запущена для {len(tg_ids)} пользователей...")
 
     sent = 0
     for i, tg_id in enumerate(tg_ids, start=1):
         try:
-            await callback.bot.send_message(tg_id, text)
+            if content.get("photo"):
+                await callback.bot.send_photo(tg_id, content["photo"], caption=content["text"])
+            elif content.get("video"):
+                await callback.bot.send_video(tg_id, content["video"], caption=content["text"])
+            else:
+                await callback.bot.send_message(tg_id, content["text"])
             sent += 1
         except Exception:
             pass

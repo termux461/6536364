@@ -7,10 +7,10 @@ from bot.keyboards.admin import admin_back_menu
 from bot.models.server import Server
 from bot.models.subscription import Subscription
 from bot.models.user import User
-from bot.utils.helpers import is_admin
+from bot.utils.helpers import admin_filter
 
 router = Router(name="admin_stats")
-router.callback_query.filter(lambda callback: is_admin(callback.from_user.id))
+router.callback_query.filter(admin_filter)
 
 
 @router.callback_query(F.data == "admin:stats")
