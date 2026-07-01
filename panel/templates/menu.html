@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Меню бота{% endblock %}
+{% block content %}
+<h1>Конструктор главного меню</h1>
+<p>Измените порядок, тексты (RU/EN) и видимость кнопок без деплоя кода.</p>
+{% for b in buttons %}
+<div class="card">
+  <form method="post" action="/panel/menu/{{ b.id }}/update">
+    <label>Действие: <code>{{ b.action }}</code></label>
+    <input type="text" name="title_ru" value="{{ b.title_ru }}" placeholder="Текст (RU)">
+    <input type="text" name="title_en" value="{{ b.title_en }}" placeholder="Текст (EN)">
+    <input type="number" name="sort_order" value="{{ b.sort_order }}" placeholder="Порядок">
+    <label><input type="checkbox" name="is_visible" value="true" {{ 'checked' if b.is_visible else '' }} style="width:auto"> Показывать пользователям</label>
+    <button type="submit">Сохранить</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}

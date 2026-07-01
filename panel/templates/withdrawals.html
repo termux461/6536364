@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Заявки на вывод{% endblock %}
+{% block content %}
+<h1>Заявки на вывод</h1>
+<table>
+<tr><th>ID</th><th>Пользователь</th><th>Сумма</th><th>Статус</th><th>Дата</th><th>Действие</th></tr>
+{% for req, user in rows %}
+<tr>
+  <td>{{ req.id }}</td>
+  <td>{{ user.full_name or user.username or user.tg_id }}</td>
+  <td>{{ req.amount }}</td>
+  <td><span class="badge {{ 'on' if req.status == 'approved' else ('off' if req.status == 'rejected' else '') }}">{{ req.status }}</span></td>
+  <td>{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+  <td>
+    {% if req.status == 'pending' %}
+    <form method="post" action="/panel/withdrawals/{{ req.id }}/approve" style="display:inline">
+      <button type="submit">Выполнить</button>
+    </form>
+    <form method="post" action="/panel/withdrawals/{{ req.id }}/reject" style="display:inline">
+      <button class="secondary" type="submit">Отклонить</button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

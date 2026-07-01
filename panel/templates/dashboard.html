@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block content %}
+<h1>Дашборд</h1>
+<div class="cards-row">
+  <div class="card"><div class="value">{{ users_count }}</div><div class="label">Пользователей</div></div>
+  <div class="card"><div class="value">{{ active_subs }}</div><div class="label">Активных подписок</div></div>
+  <div class="card"><div class="value">{{ revenue }} ₽</div><div class="label">Общая выручка</div></div>
+  <div class="card"><div class="value">{{ open_tickets }}</div><div class="label">Открытых тикетов</div></div>
+</div>
+{% endblock %}

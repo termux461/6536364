@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Тарифы{% endblock %}
+{% block content %}
+<h1>Тарифы</h1>
+
+<div class="card">
+  <h3>Добавить тариф</h3>
+  <form method="post" action="/panel/tariffs/create">
+    <select name="host_id" required>
+      {% for h in hosts %}<option value="{{ h.id }}">{{ h.name }}</option>{% endfor %}
+    </select>
+    <input type="text" name="name" placeholder="Название тарифа" required>
+    <textarea name="description" placeholder="Описание"></textarea>
+    <input type="number" step="0.01" name="price" placeholder="Цена, ₽" required>
+    <input type="number" name="duration_days" placeholder="Длительность, дней" required>
+    <input type="number" name="traffic_limit_gb" placeholder="Лимит трафика, ГБ (0 = безлимит)" value="0">
+    <button type="submit">Добавить</button>
+  </form>
+</div>
+
+<table>
+<tr><th>Название</th><th>Хост</th><th>Цена</th><th>Срок</th><th>Трафик</th><th>Статус</th><th>Действия</th></tr>
+{% for t in tariffs %}
+<tr>
+  <td>{{ t.name }}</td>
+  <td>{{ t.host_id }}</td>
+  <td>{{ t.price }} ₽</td>
+  <td>{{ t.duration_days }} дн.</td>
+  <td>{{ t.traffic_limit_gb if t.traffic_limit_gb else 'безлимит' }}</td>
+  <td><span class="badge {{ 'on' if t.is_active else 'off' }}">{{ 'активен' if t.is_active else 'выключен' }}</span></td>
+  <td>
+    <form class="inline" method="post" action="/panel/tariffs/{{ t.id }}/toggle">
+      <button class="secondary" type="submit">{{ 'Выключить' if t.is_active else 'Включить' }}</button>
+    </form>
+    <form class="inline" method="post" action="/panel/tariffs/{{ t.id }}/delete">
+      <button class="danger" type="submit">Удалить</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

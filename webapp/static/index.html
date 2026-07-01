@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Поддержка</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/webapp/static/css/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <button id="backBtn" class="icon-btn" hidden>←</button>
+    <img id="brandLogo" class="brand-logo" hidden>
+    <h1 id="title">Поддержка</h1>
+  </header>
+
+  <section id="profileView" hidden>
+    <div class="card" id="subscriptionCard"></div>
+    <div class="card" id="balanceCard"></div>
+  </section>
+
+  <section id="ticketListView" hidden>
+    <button id="newTicketBtn" class="primary-btn"></button>
+    <div id="ticketList" class="ticket-list"></div>
+  </section>
+
+  <section id="newTicketView" hidden>
+    <select id="categorySelect"></select>
+    <input id="subjectInput" type="text" maxlength="255">
+    <textarea id="messageInput" rows="5"></textarea>
+    <input id="fileInput" type="file" accept="image/*,application/pdf,.doc,.docx,.txt">
+    <button id="submitTicketBtn" class="primary-btn"></button>
+  </section>
+
+  <section id="ticketThreadView" hidden>
+    <div id="ticketStatus" class="status-badge"></div>
+    <div id="messagesList" class="messages-list"></div>
+    <div class="reply-bar">
+      <input id="replyInput" type="text">
+      <input id="replyFileInput" type="file" accept="image/*,application/pdf,.doc,.docx,.txt">
+      <button id="sendReplyBtn" class="icon-btn">➤</button>
+    </div>
+  </section>
+
+  <nav class="tab-bar">
+    <button id="tabSupport" class="tab-btn active"><span class="tab-icon">🆘</span><span id="tabSupportLabel"></span></button>
+    <button id="tabProfile" class="tab-btn"><span class="tab-icon">👤</span><span id="tabProfileLabel"></span></button>
+  </nav>
+</div>
+<script src="/webapp/static/js/app.js"></script>
+</body>
+</html>

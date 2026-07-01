@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Хосты{% endblock %}
+{% block content %}
+<h1>Хосты Remnawave</h1>
+
+<div class="card">
+  <h3>Добавить хост</h3>
+  <form method="post" action="/panel/hosts/create">
+    <input type="text" name="name" placeholder="Название" required>
+    <input type="text" name="api_url" placeholder="API URL (https://panel.example/api)" required>
+    <input type="text" name="api_token" placeholder="API токен" required>
+    <input type="text" name="ssh_host" placeholder="SSH host (опционально)">
+    <input type="number" name="ssh_port" placeholder="SSH port" value="22">
+    <input type="text" name="ssh_user" placeholder="SSH user">
+    <input type="password" name="ssh_password" placeholder="SSH password">
+    <button type="submit">Добавить</button>
+  </form>
+</div>
+
+<table>
+<tr><th>Название</th><th>URL</th><th>Статус</th><th>Пинг</th><th>Действия</th></tr>
+{% for h in hosts %}
+<tr>
+  <td>{{ h.name }}</td>
+  <td>{{ h.api_url }}</td>
+  <td><span class="badge {{ 'on' if h.is_active else 'off' }}">{{ 'активен' if h.is_active else 'выключен' }}</span></td>
+  <td>{{ h.last_ping_ms if h.last_ping_ms is not none else '—' }} мс</td>
+  <td>
+    <form class="inline" method="post" action="/panel/hosts/{{ h.id }}/toggle">
+      <button class="secondary" type="submit">{{ 'Выключить' if h.is_active else 'Включить' }}</button>
+    </form>
+    <form class="inline" method="post" action="/panel/hosts/{{ h.id }}/delete">
+      <button class="danger" type="submit">Удалить</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

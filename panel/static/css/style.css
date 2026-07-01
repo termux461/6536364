@@ -1,0 +1,32 @@
+* { box-sizing: border-box; font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+body { margin: 0; background: #f4f6f8; color: #1a1a1a; }
+.layout { display: flex; min-height: 100vh; }
+.sidebar { width: 220px; background: #1b2733; color: #fff; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar .brand { font-weight: 700; font-size: 18px; margin-bottom: 16px; }
+.sidebar a { color: #cfd8dc; text-decoration: none; padding: 10px 12px; border-radius: 8px; }
+.sidebar a:hover { background: #2c3e50; color: #fff; }
+.content { flex: 1; padding: 24px; }
+.flash { background: #e3f2fd; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }
+h1 { margin-top: 0; }
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+th { background: #fafafa; }
+.card { background: #fff; padding: 20px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 16px; }
+.cards-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.cards-row .card { flex: 1; min-width: 180px; }
+.card .value { font-size: 28px; font-weight: 700; }
+.card .label { color: #777; font-size: 13px; }
+form.inline { display: inline; }
+input, select, textarea {
+  width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 10px; font-size: 14px;
+}
+button, .btn {
+  background: #2481cc; color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  text-decoration: none; display: inline-block;
+}
+button.danger, .btn.danger { background: #d32f2f; }
+button.secondary, .btn.secondary { background: #607d8b; }
+.badge { padding: 3px 9px; border-radius: 12px; font-size: 12px; background: #e0e0e0; }
+.badge.on { background: #c8e6c9; color: #2e7d32; }
+.badge.off { background: #ffcdd2; color: #c62828; }
+.login-box { max-width: 360px; margin: 80px auto; }

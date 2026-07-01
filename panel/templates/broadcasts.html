@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Рассылки{% endblock %}
+{% block content %}
+<h1>Рассылки</h1>
+<div class="card">
+  <h3>Новая рассылка</h3>
+  <form method="post" action="/panel/broadcasts/create">
+    <textarea name="text" placeholder="Текст рассылки" required></textarea>
+    <button type="submit">Отправить всем</button>
+  </form>
+</div>
+<table>
+<tr><th>Текст</th><th>Статус</th><th>Доставлено</th><th>Дата</th></tr>
+{% for b in broadcasts %}
+<tr>
+  <td>{{ b.text[:80] }}</td>
+  <td>{{ b.status }}</td>
+  <td>{{ b.sent_count }}/{{ b.total_count }}</td>
+  <td>{{ b.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

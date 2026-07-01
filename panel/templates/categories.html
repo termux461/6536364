@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Категории тикетов{% endblock %}
+{% block content %}
+<h1>Категории тикетов</h1>
+<p>Темы, которые пользователь выбирает при создании обращения в Mini App поддержки.</p>
+
+<div class="card">
+  <form method="post" action="/panel/categories/create">
+    <input type="text" name="title_ru" placeholder="Название (RU)" required>
+    <input type="text" name="title_en" placeholder="Название (EN)" required>
+    <input type="number" name="sort_order" value="0" placeholder="Порядок">
+    <button type="submit">Добавить</button>
+  </form>
+</div>
+
+{% for c in categories %}
+<div class="card">
+  <form method="post" action="/panel/categories/{{ c.id }}/update">
+    <input type="text" name="title_ru" value="{{ c.title_ru }}">
+    <input type="text" name="title_en" value="{{ c.title_en }}">
+    <input type="number" name="sort_order" value="{{ c.sort_order }}">
+    <label><input type="checkbox" name="is_active" value="true" {{ 'checked' if c.is_active else '' }} style="width:auto"> Активна</label>
+    <button type="submit">Сохранить</button>
+  </form>
+  <form method="post" action="/panel/categories/{{ c.id }}/delete" style="margin-top:6px">
+    <button class="danger" type="submit">Удалить</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}
