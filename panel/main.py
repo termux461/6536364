@@ -6,8 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from database.db import init_db
 from panel.routes import (
-    appearance, broadcasts, categories, dashboard, hosts, login, menu,
-    payments, tariffs, tickets, withdrawals,
+    appearance, audit, broadcasts, categories, dashboard, hosts, login, menu,
+    payments, promos, tariffs, tickets, users, withdrawals,
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,3 +37,6 @@ app.include_router(menu.router)
 app.include_router(withdrawals.router)
 app.include_router(categories.router)
 app.include_router(appearance.router)
+app.include_router(users.router)
+app.include_router(promos.router)
+app.include_router(audit.router)

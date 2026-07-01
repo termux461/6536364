@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+<h1>Пользователи</h1>
+<div style="display:flex;gap:12px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+  <form method="get" style="display:flex;gap:8px;flex:1;min-width:260px">
+    <input name="search" value="{{ search }}" placeholder="Поиск по username / tg_id / имени" style="flex:1;margin:0">
+    <button type="submit">🔍 Найти</button>
+  </form>
+  <a class="btn secondary" href="/panel/users/export">⬇ CSV</a>
+  <a class="btn secondary" href="/panel/payments/export">⬇ Платежи CSV</a>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th><th>TG ID</th><th>Username</th><th>Имя</th><th>Баланс</th><th>Дата</th><th>Статус</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for u in users %}
+    <tr>
+      <td>{{ u.id }}</td>
+      <td>{{ u.tg_id }}</td>
+      <td>{{ u.username or '—' }}</td>
+      <td>{{ u.full_name or '—' }}</td>
+      <td>{{ u.balance }} ₽</td>
+      <td>{{ u.created_at.strftime('%Y-%m-%d') }}</td>
+      <td>
+        {% if u.is_banned %}<span class="badge off">Забанен</span>
+        {% else %}<span class="badge on">Активен</span>{% endif %}
+      </td>
+      <td><a class="btn secondary" href="/panel/users/{{ u.id }}">Подробнее</a></td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" style="opacity:.5">Пользователи не найдены</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if has_more or offset > 0 %}
+<div style="margin-top:12px;display:flex;gap:8px">
+  {% if offset > 0 %}
+  <a class="btn secondary" href="?search={{ search }}&offset={{ [offset-50, 0]|max }}">← Назад</a>
+  {% endif %}
+  {% if has_more %}
+  <a class="btn secondary" href="?search={{ search }}&offset={{ offset+50 }}">Вперёд →</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

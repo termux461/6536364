@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Пользователь #{{ u.id }}{% endblock %}
+{% block content %}
+<h1>Пользователь #{{ u.id }}</h1>
+<a href="/panel/users" class="btn secondary" style="margin-bottom:16px;display:inline-block">← Назад</a>
+
+<div class="cards-row" style="margin-bottom:16px">
+  <div class="card">
+    <div class="label">TG ID</div><div class="value" style="font-size:20px">{{ u.tg_id }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Username</div><div class="value" style="font-size:20px">{{ u.username or '—' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Баланс</div><div class="value" style="font-size:20px">{{ u.balance }} ₽</div>
+  </div>
+  <div class="card">
+    <div class="label">Статус</div>
+    <div class="value" style="font-size:16px;margin-top:6px">
+      {% if u.is_banned %}<span class="badge off">Забанен</span>{% else %}<span class="badge on">Активен</span>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px">
+  <b>Имя:</b> {{ u.full_name or '—' }}&nbsp;&nbsp;
+  <b>Локаль:</b> {{ u.locale }}&nbsp;&nbsp;
+  <b>Зарегистрирован:</b> {{ u.created_at.strftime('%Y-%m-%d %H:%M') }}
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+  <form class="inline" method="post" action="/panel/users/{{ u.id }}/ban">
+    <button class="{% if u.is_banned %}btn{% else %}btn danger{% endif %}">
+      {% if u.is_banned %}✅ Разбанить{% else %}🚫 Забанить{% endif %}
+    </button>
+  </form>
+  <form class="inline" method="post" action="/panel/users/{{ u.id }}/adjust_balance" style="display:flex;gap:6px">
+    <input name="amount" type="number" step="0.01" placeholder="Сумма (+ или −)" style="width:160px;margin:0">
+    <button type="submit">💰 Изменить баланс</button>
+  </form>
+</div>
+
+<h3>Подписки</h3>
+<table style="margin-bottom:20px">
+  <thead><tr><th>#</th><th>Тариф</th><th>Статус</th><th>Начало</th><th>До</th><th></th></tr></thead>
+  <tbody>
+  {% for s in subs %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.tariff.name if s.tariff else '—' }}</td>
+      <td>
+        {% if s.status.value == 'active' %}<span class="badge on">Активна</span>
+        {% elif s.status.value == 'expired' %}<span class="badge off">Истекла</span>
+        {% else %}<span class="badge">Отменена</span>{% endif %}
+      </td>
+      <td>{{ s.starts_at.strftime('%Y-%m-%d') }}</td>
+      <td>{{ s.expires_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>
+        {% if s.status.value == 'active' %}
+        <form class="inline" method="post" action="/panel/users/{{ u.id }}/cancel_sub">
+          <input type="hidden" name="sub_id" value="{{ s.id }}">
+          <button class="btn danger">Отменить</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" style="opacity:.5">Нет подписок</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h3>Последние платежи</h3>
+<table>
+  <thead><tr><th>#</th><th>Провайдер</th><th>Сумма</th><th>Скидка</th><th>Статус</th><th>Дата</th></tr></thead>
+  <tbody>
+  {% for p in payments %}
+    <tr>
+      <td>{{ p.id }}</td>
+      <td>{{ p.provider }}</td>
+      <td>{{ p.amount }} {{ p.currency }}</td>
+      <td>{{ p.discount_amount if p.discount_amount else '—' }}</td>
+      <td>
+        {% if p.status.value == 'paid' %}<span class="badge on">Оплачен</span>
+        {% elif p.status.value == 'pending' %}<span class="badge">Ожидает</span>
+        {% else %}<span class="badge off">{{ p.status.value }}</span>{% endif %}
+      </td>
+      <td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" style="opacity:.5">Нет платежей</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

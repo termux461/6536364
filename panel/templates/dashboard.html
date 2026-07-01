@@ -2,10 +2,48 @@
 {% block title %}Дашборд{% endblock %}
 {% block content %}
 <h1>Дашборд</h1>
+
 <div class="cards-row">
-  <div class="card"><div class="value">{{ users_count }}</div><div class="label">Пользователей</div></div>
+  <div class="card"><div class="value">{{ users_count }}</div><div class="label">Пользователей всего</div></div>
   <div class="card"><div class="value">{{ active_subs }}</div><div class="label">Активных подписок</div></div>
-  <div class="card"><div class="value">{{ revenue }} ₽</div><div class="label">Общая выручка</div></div>
+  <div class="card"><div class="value">{{ "%.0f"|format(revenue) }} ₽</div><div class="label">Общая выручка</div></div>
   <div class="card"><div class="value">{{ open_tickets }}</div><div class="label">Открытых тикетов</div></div>
+  <div class="card"><div class="value">+{{ new_today }}</div><div class="label">Новых сегодня</div></div>
+  <div class="card"><div class="value">{{ revenue_today }} ₽</div><div class="label">Выручка сегодня</div></div>
 </div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:12px">Выручка за 7 дней, ₽</div>
+    <canvas id="revChart" height="160"></canvas>
+  </div>
+  <div class="card">
+    <div style="font-weight:600;margin-bottom:12px">Новые пользователи за 7 дней</div>
+    <canvas id="usrChart" height="160"></canvas>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const revLabels = {{ rev_labels|safe }};
+const revValues = {{ rev_values|safe }};
+const usrLabels = {{ usr_labels|safe }};
+const usrValues = {{ usr_values|safe }};
+
+const BAR_OPTS = {
+  responsive: true,
+  plugins: { legend: { display: false } },
+  scales: { y: { beginAtZero: true, grid: { color: '#eee' } }, x: { grid: { display: false } } },
+};
+new Chart(document.getElementById('revChart'), {
+  type: 'bar',
+  data: { labels: revLabels, datasets: [{ data: revValues, backgroundColor: '#2481cc', borderRadius: 4 }] },
+  options: BAR_OPTS,
+});
+new Chart(document.getElementById('usrChart'), {
+  type: 'bar',
+  data: { labels: usrLabels, datasets: [{ data: usrValues, backgroundColor: '#43a047', borderRadius: 4 }] },
+  options: BAR_OPTS,
+});
+</script>
 {% endblock %}

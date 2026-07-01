@@ -22,7 +22,8 @@ from bot.services.support import ensure_categories_seeded
 from config import settings
 from database.db import async_session, init_db
 from database.models import (
-    Payment, PaymentStatus, SenderType, Subscription, SubscriptionStatus,
+    Payment, PaymentMethod, PaymentStatus, PromoCode, SenderType,
+    Subscription, SubscriptionStatus, Tariff,
     Ticket, TicketCategory, TicketMessage, TicketStatus, User,
 )
 from webapp.security import validate_init_data
@@ -306,3 +307,186 @@ async def yookassa_webhook(request: Request) -> dict:
         if is_paid:
             await _process_paid_webhook(external_id, "yookassa")
     return {"ok": True}
+
+
+# ── Mini App purchase flow ────────────────────────────────────────────────────
+
+@app.get("/api/tariffs")
+async def list_tariffs(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    tariffs = (
+        await session.execute(
+            select(Tariff).options(selectinload(Tariff.host))
+            .where(Tariff.is_active.is_(True)).order_by(Tariff.sort_order)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": t.id, "name": t.name, "description": t.description or "",
+            "price": t.price, "duration_days": t.duration_days,
+            "traffic_limit_gb": t.traffic_limit_gb,
+        }
+        for t in tariffs
+    ]
+
+
+@app.get("/api/payment-methods-list")
+async def list_payment_methods(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    methods = (
+        await session.execute(
+            select(PaymentMethod).where(PaymentMethod.is_enabled.is_(True)).order_by(PaymentMethod.sort_order)
+        )
+    ).scalars().all()
+    return [{"code": m.code, "title": m.title} for m in methods]
+
+
+@app.post("/api/validate-promo")
+async def validate_promo(
+    code: str = Form(...),
+    tariff_id: int = Form(...),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    promo = (
+        await session.execute(
+            select(PromoCode).where(PromoCode.code == code.strip().upper(), PromoCode.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if (
+        not promo
+        or (promo.expires_at and promo.expires_at < now)
+        or (promo.max_uses is not None and promo.uses_count >= promo.max_uses)
+    ):
+        raise HTTPException(status_code=404, detail="Promo code invalid")
+    tariff = (await session.execute(select(Tariff).where(Tariff.id == tariff_id))).scalar_one_or_none()
+    if not tariff:
+        raise HTTPException(status_code=404, detail="Tariff not found")
+    discount = round(tariff.price * promo.discount_percent / 100, 2)
+    return {
+        "promo_id": promo.id,
+        "discount_percent": promo.discount_percent,
+        "discount_amount": discount,
+        "final_price": max(0.0, round(tariff.price - discount, 2)),
+    }
+
+
+@app.post("/api/payments")
+async def create_webapp_payment(
+    tariff_id: int = Form(...),
+    provider: str = Form(...),
+    promo_code: str = Form(""),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    import datetime as _dt
+    tariff = (await session.execute(select(Tariff).where(Tariff.id == tariff_id))).scalar_one_or_none()
+    if not tariff:
+        raise HTTPException(status_code=404, detail="Tariff not found")
+
+    promo_id = None
+    discount_amount = 0.0
+    final_price = tariff.price
+
+    if promo_code.strip():
+        now = _dt.datetime.now(_dt.timezone.utc)
+        promo = (
+            await session.execute(
+                select(PromoCode).where(PromoCode.code == promo_code.strip().upper(), PromoCode.is_active.is_(True))
+            )
+        ).scalar_one_or_none()
+        if promo and not (promo.expires_at and promo.expires_at < now) and \
+                not (promo.max_uses is not None and promo.uses_count >= promo.max_uses):
+            discount_amount = round(tariff.price * promo.discount_percent / 100, 2)
+            final_price = max(0.0, round(tariff.price - discount_amount, 2))
+            promo_id = promo.id
+            promo.uses_count += 1
+
+    payment = Payment(
+        user_id=user.id, tariff_id=tariff.id, provider=provider,
+        amount=final_price, currency="RUB" if provider != "stars" else "XTR",
+        promo_code_id=promo_id, discount_amount=discount_amount,
+    )
+    session.add(payment)
+    await session.flush()
+
+    pay_url = None
+    invoice_link = None
+
+    if provider == "stars":
+        stars_amount = max(1, int(round(final_price)))
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{settings.BOT_TOKEN}/createInvoiceLink",
+                json={
+                    "title": "VPN",
+                    "description": tariff.name,
+                    "payload": str(payment.id),
+                    "provider_token": "",
+                    "currency": "XTR",
+                    "prices": [{"label": "VPN", "amount": stars_amount}],
+                },
+            )
+            if resp.is_success:
+                invoice_link = resp.json().get("result")
+        payment.external_id = str(payment.id)
+
+    elif provider == "cryptobot" and settings.CRYPTOBOT_API_TOKEN:
+        cb = CryptoBotProvider(settings.CRYPTOBOT_API_TOKEN, settings.CRYPTOBOT_API_URL)
+        result = await cb.create_payment(
+            amount=final_price, currency="RUB",
+            description=tariff.name, payload={"payment_id": payment.id},
+        )
+        payment.external_id = result.external_id
+        pay_url = result.pay_url
+
+    elif provider == "yookassa" and settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY:
+        yk = YooKassaProvider(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY)
+        result = await yk.create_payment(
+            amount=final_price, currency="RUB",
+            description=tariff.name, payload={"payment_id": payment.id},
+        )
+        payment.external_id = result.external_id
+        pay_url = result.pay_url
+
+    else:
+        raise HTTPException(status_code=400, detail="Payment provider not available")
+
+    await session.commit()
+    return {"payment_id": payment.id, "pay_url": pay_url, "invoice_link": invoice_link}
+
+
+@app.get("/api/payments/{payment_id}/check")
+async def check_webapp_payment(
+    payment_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    payment = (
+        await session.execute(select(Payment).where(Payment.id == payment_id, Payment.user_id == user.id))
+    ).scalar_one_or_none()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if payment.status == PaymentStatus.PAID:
+        return {"status": "paid"}
+
+    if payment.provider != "stars" and payment.external_id:
+        from bot.services.payments.registry import build_provider as _build
+        provider_obj = _build(payment.provider, None)  # type: ignore[arg-type]
+        if provider_obj:
+            try:
+                is_paid = await provider_obj.check_payment(payment.external_id)
+                if is_paid:
+                    await fulfil_payment(session, payment)
+                    return {"status": "paid"}
+            except Exception:
+                pass
+
+    return {"status": payment.status.value if hasattr(payment.status, "value") else payment.status}

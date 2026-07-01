@@ -83,6 +83,7 @@ class Subscription(Base):
     status: Mapped[SubscriptionStatus] = mapped_column(Enum(SubscriptionStatus), default=SubscriptionStatus.ACTIVE)
     starts_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True))
+    reminder_sent_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="subscriptions")
     tariff: Mapped["Tariff"] = relationship()
@@ -108,6 +109,8 @@ class Payment(Base):
     status: Mapped[PaymentStatus] = mapped_column(Enum(PaymentStatus), default=PaymentStatus.PENDING)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    promo_code_id: Mapped[int | None] = mapped_column(ForeignKey("promo_codes.id", ondelete="SET NULL"), nullable=True)
+    discount_amount: Mapped[float] = mapped_column(Float, default=0)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     paid_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -222,6 +225,33 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(128), unique=True)
     value: Mapped[str] = mapped_column(Text, default="")
+
+
+class PromoCode(Base):
+    """Admin-created discount coupons applied at purchase time."""
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    discount_percent: Mapped[float] = mapped_column(Float, default=0)  # 0-100
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)  # None = unlimited
+    uses_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    expires_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AuditLog(Base):
+    """Admin action audit trail."""
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(128))
+    target_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Broadcast(Base):

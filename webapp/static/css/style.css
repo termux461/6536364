@@ -59,3 +59,9 @@ input[type=file] { width: 100%; margin-bottom: 8px; }
 }
 .tab-btn.active { opacity: 1; color: var(--accent); }
 .tab-icon { font-size: 18px; }
+
+.tariff-item { position: relative; }
+.tariff-item .primary-btn { width: auto; padding: 8px 20px; margin-top: 10px; margin-bottom: 0; }
+.pay-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+#qrContainer { display: flex; justify-content: center; padding: 8px 0; }
+#qrContainer img, #qrContainer canvas { border-radius: 8px; }

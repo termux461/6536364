@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Аудит{% endblock %}
+{% block content %}
+<h1>Журнал действий</h1>
+<table>
+  <thead>
+    <tr><th>Дата</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Детали</th></tr>
+  </thead>
+  <tbody>
+  {% for log in logs %}
+    <tr>
+      <td style="white-space:nowrap">{{ log.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ log.actor }}</td>
+      <td>{{ log.action }}</td>
+      <td>
+        {% if log.target_type %}{{ log.target_type }}{% if log.target_id %} #{{ log.target_id }}{% endif %}{% else %}—{% endif %}
+      </td>
+      <td style="color:#555;font-size:13px">{{ log.detail or '—' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" style="opacity:.5">Журнал пуст</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

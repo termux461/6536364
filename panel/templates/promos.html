@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Промокоды{% endblock %}
+{% block content %}
+<h1>Промокоды</h1>
+
+<div class="card" style="margin-bottom:20px">
+  <h3 style="margin-top:0">Создать промокод</h3>
+  <form method="post" action="/panel/promos/create">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <label>Код (латиница, заглавные)</label>
+        <input name="code" required placeholder="SUMMER20" style="text-transform:uppercase">
+      </div>
+      <div>
+        <label>Скидка, %</label>
+        <input name="discount_percent" type="number" min="1" max="100" required placeholder="20">
+      </div>
+      <div>
+        <label>Макс. использований (пусто = неограничено)</label>
+        <input name="max_uses" type="number" min="1" placeholder="">
+      </div>
+      <div>
+        <label>Действителен до (пусто = бессрочно)</label>
+        <input name="expires_at" type="datetime-local">
+      </div>
+    </div>
+    <button type="submit">Создать</button>
+  </form>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Код</th><th>Скидка</th><th>Исп./Макс.</th><th>Истекает</th><th>Статус</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for p in promos %}
+    <tr>
+      <td><b>{{ p.code }}</b></td>
+      <td>{{ p.discount_percent }}%</td>
+      <td>{{ p.uses_count }} / {{ p.max_uses if p.max_uses else '∞' }}</td>
+      <td>{{ p.expires_at.strftime('%Y-%m-%d') if p.expires_at else '—' }}</td>
+      <td>
+        {% if p.is_active %}<span class="badge on">Активен</span>
+        {% else %}<span class="badge off">Выключен</span>{% endif %}
+      </td>
+      <td style="display:flex;gap:6px">
+        <form class="inline" method="post" action="/panel/promos/{{ p.id }}/toggle">
+          <button class="btn secondary">{{ 'Выключить' if p.is_active else 'Включить' }}</button>
+        </form>
+        <form class="inline" method="post" action="/panel/promos/{{ p.id }}/delete"
+              onsubmit="return confirm('Удалить промокод {{ p.code }}?')">
+          <button class="btn danger">Удалить</button>
+        </form>
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" style="opacity:.5">Промокодов нет</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

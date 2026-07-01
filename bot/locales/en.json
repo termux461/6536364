@@ -36,5 +36,11 @@
   "common.back": "⬅️ Back",
   "common.cancel": "❌ Cancel",
   "admin.menu": "🛠 Admin panel",
-  "admin.not_allowed": "Not enough permissions."
+  "admin.not_allowed": "Not enough permissions.",
+  "buy.promo_prompt": "Enter a promo code for a discount or press \"Skip\":",
+  "buy.promo_skip": "⏭ Skip",
+  "buy.promo_invalid": "❌ Promo code not found or invalid.",
+  "buy.promo_applied": "✅ Promo code applied! Discount {discount}%. Total: {price} RUB",
+  "sub.reminder_3d": "⚠️ Your subscription \"{tariff}\" expires in 3 days ({expires}).\nRenew early to keep your access.",
+  "sub.reminder_1d": "🔴 Your subscription \"{tariff}\" expires tomorrow ({expires})!\nRenew now to avoid losing access."
 }

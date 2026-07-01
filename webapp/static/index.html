@@ -3,8 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Поддержка</title>
+<title>VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="/webapp/static/css/style.css">
 </head>
 <body>
@@ -12,11 +13,15 @@
   <header class="topbar">
     <button id="backBtn" class="icon-btn" hidden>←</button>
     <img id="brandLogo" class="brand-logo" hidden>
-    <h1 id="title">Поддержка</h1>
+    <h1 id="title">VPN</h1>
   </header>
 
   <section id="profileView" hidden>
     <div class="card" id="subscriptionCard"></div>
+    <div class="card" id="qrCard" hidden>
+      <div class="sub-title" id="qrTitle"></div>
+      <div id="qrContainer"></div>
+    </div>
     <div class="card" id="balanceCard"></div>
   </section>
 
@@ -39,13 +44,41 @@
     <div class="reply-bar">
       <input id="replyInput" type="text">
       <input id="replyFileInput" type="file" accept="image/*,application/pdf,.doc,.docx,.txt">
-      <button id="sendReplyBtn" class="icon-btn">➤</button>
+      <button id="sendReplyBtn" class="icon-btn">&#10148;</button>
     </div>
   </section>
 
+  <section id="tariffsView" hidden>
+    <div id="tariffList" class="ticket-list"></div>
+  </section>
+
+  <section id="buyView" hidden>
+    <div id="buyTariffInfo" class="card"></div>
+    <div class="card">
+      <div class="sub-title" id="promoTitle"></div>
+      <div class="sub-link">
+        <input id="promoInput" type="text" style="text-transform:uppercase">
+        <button id="applyPromoBtn" class="secondary-btn"></button>
+      </div>
+      <div id="promoResult" style="font-size:13px;margin-top:4px"></div>
+    </div>
+    <div class="card">
+      <div class="sub-title" id="payMethodTitle"></div>
+      <div id="payMethodList"></div>
+    </div>
+    <div id="payStatus" style="padding:8px 0;font-size:14px"></div>
+  </section>
+
   <nav class="tab-bar">
-    <button id="tabSupport" class="tab-btn active"><span class="tab-icon">🆘</span><span id="tabSupportLabel"></span></button>
-    <button id="tabProfile" class="tab-btn"><span class="tab-icon">👤</span><span id="tabProfileLabel"></span></button>
+    <button id="tabSupport" class="tab-btn active">
+      <span class="tab-icon">&#128310;</span><span id="tabSupportLabel"></span>
+    </button>
+    <button id="tabTariffs" class="tab-btn">
+      <span class="tab-icon">&#128176;</span><span id="tabTariffsLabel"></span>
+    </button>
+    <button id="tabProfile" class="tab-btn">
+      <span class="tab-icon">&#128100;</span><span id="tabProfileLabel"></span>
+    </button>
   </nav>
 </div>
 <script src="/webapp/static/js/app.js"></script>

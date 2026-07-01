@@ -3,6 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 class BuyFlow(StatesGroup):
     choosing_tariff = State()
+    entering_promo = State()
     choosing_payment = State()
     waiting_payment = State()
 
