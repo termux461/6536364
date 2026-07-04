@@ -122,7 +122,9 @@ class LcVpnService : VpnService() {
                 Timber.i("VPN connected to %s (%s mode)", server.name, tunnelMode)
             }.onFailure { e ->
                 Timber.e(e, "Failed to connect")
-                state.value = ConnectionState.Error(e.message ?: "Unknown error")
+                val message = describeConnectError(e)
+                state.value = ConnectionState.Error(message)
+                showErrorNotification(message)
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
@@ -213,6 +215,28 @@ class LcVpnService : VpnService() {
         super.onRevoke()
     }
 
+    /** Turns a raw exception into a short message the user can actually act on. */
+    private fun describeConnectError(e: Throwable): String = when {
+        e.message?.contains("address already in use", ignoreCase = true) == true ->
+            "Порт занят другим приложением. Попробуй закрыть другие VPN/прокси и подключиться снова."
+        else -> e.message ?: "Неизвестная ошибка"
+    }
+
+    /** A one-shot, dismissible alert - separate from the ongoing connection notification - so a
+     *  failed connect is visible even if the user isn't looking at the app right now. */
+    private fun showErrorNotification(message: String) {
+        ensureNotificationChannel()
+        val notification = baseNotificationBuilder()
+            .setContentTitle("LC VPN: не удалось подключиться")
+            .setContentText(message)
+            .setOngoing(false)
+            .setAutoCancel(true)
+            .build()
+        runCatching {
+            getSystemService(NotificationManager::class.java).notify(ERROR_NOTIFICATION_ID, notification)
+        }.onFailure { Timber.w(it, "Failed to show connect-error notification") }
+    }
+
     private fun buildConnectingNotification(): Notification {
         ensureNotificationChannel()
         return baseNotificationBuilder()
@@ -256,6 +280,7 @@ class LcVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.lizercool.lcvpn.DISCONNECT"
         private const val CHANNEL_ID = "lcvpn_status"
         private const val NOTIFICATION_ID = 1
+        private const val ERROR_NOTIFICATION_ID = 2
         private const val TUN_ADDRESS = "10.10.10.1"
         private const val TUN_MTU = 1500
         const val LAN_PROXY_PORT = 10809
