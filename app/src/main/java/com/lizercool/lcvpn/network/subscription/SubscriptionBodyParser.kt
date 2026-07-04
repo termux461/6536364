@@ -11,16 +11,11 @@ import timber.log.Timber
 import android.util.Base64
 
 /**
- * Best-effort parser for whatever a Remnawave-style subscription endpoint returns.
+ * Parser for the sub.lizercoolvpn.space subscription endpoint.
  *
- * Two shapes are supported today:
- *  1. The universal fallback: base64-encoded, newline-separated share links
- *     (vless://..., hysteria2://...) - what most panels serve to an unrecognized client.
- *  2. A generic JSON array of host objects, in case the panel is configured to answer
- *     the "Lizercool" User-Agent with structured JSON instead.
- *
- * TODO: once we have a real sample response from sub.lizercoolvpn.space, replace shape 2
- * with an exact match of Remnawave's actual schema.
+ *  1. Confirmed real format: base64 body, newline-separated "vless://..." share links.
+ *  2. A generic JSON array of host objects, kept as a fallback in case the panel is ever
+ *     configured to answer with structured JSON instead (not seen in practice yet).
  */
 object SubscriptionBodyParser {
 

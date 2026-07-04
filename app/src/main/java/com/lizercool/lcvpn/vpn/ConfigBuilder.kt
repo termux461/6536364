@@ -76,13 +76,23 @@ object ConfigBuilder {
             }
             else -> streamSettings.put("security", "none")
         }
-        if (server.network == "ws") {
-            streamSettings.put(
+        when (server.network) {
+            "ws" -> streamSettings.put(
                 "wsSettings",
                 JSONObject()
                     .put("path", server.wsPath ?: "/")
                     .put("headers", JSONObject().put("Host", server.wsHost ?: server.sni ?: server.address)),
             )
+            "xhttp" -> {
+                val xhttpSettings = JSONObject()
+                    .put("path", server.wsPath ?: "/")
+                    .put("host", server.wsHost ?: server.sni ?: server.address)
+                    .put("mode", server.xhttpMode ?: "auto")
+                server.xhttpExtraJson?.let { extra ->
+                    runCatching { JSONObject(extra) }.onSuccess { xhttpSettings.put("extra", it) }
+                }
+                streamSettings.put("xhttpSettings", xhttpSettings)
+            }
         }
 
         return JSONObject()

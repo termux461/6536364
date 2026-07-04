@@ -17,13 +17,17 @@ data class ServerEntity(
     // VLESS
     val uuid: String? = null,
     val flow: String? = null,
-    val network: String = "tcp", // tcp / ws / grpc
+    val network: String = "tcp", // tcp / ws / xhttp / grpc
     val wsPath: String? = null,
     val wsHost: String? = null,
     val sni: String? = null,
     val realityPublicKey: String? = null,
     val realityShortId: String? = null,
     val realityFingerprint: String? = null,
+
+    // xhttp transport (used by the Lizercool/Remnawave panel for CDN-friendly + anti-DPI routes)
+    val xhttpMode: String? = null,
+    val xhttpExtraJson: String? = null,
 
     // Hysteria2
     val hysteria2Password: String? = null,

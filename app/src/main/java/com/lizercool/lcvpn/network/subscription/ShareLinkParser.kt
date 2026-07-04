@@ -6,12 +6,10 @@ import java.net.URI
 import java.net.URLDecoder
 
 /**
- * Parses individual share links (the "vless://...", "hysteria2://..." lines you get out of a
- * decoded Xray/sing-box-style subscription body) into a [ServerEntity].
+ * Parses individual share links ("vless://...", "hysteria2://...") into a [ServerEntity].
  *
- * This is the generic/lowest-common-denominator format almost every panel (Remnawave included)
- * falls back to for an unrecognized client User-Agent. Once we see the actual JSON your panel
- * returns for the "Lizercool" client we can add a dedicated parser next to this one.
+ * Confirmed against a real response from sub.lizercoolvpn.space: base64 body, one vless://
+ * line per server, reality/tls/none security and tcp/ws/xhttp transports.
  */
 object ShareLinkParser {
 
@@ -59,6 +57,8 @@ object ShareLinkParser {
             realityPublicKey = params["pbk"],
             realityShortId = params["sid"],
             realityFingerprint = params["fp"],
+            xhttpMode = params["mode"].takeIf { network == "xhttp" },
+            xhttpExtraJson = params["extra"].takeIf { network == "xhttp" },
         )
     }
 
