@@ -64,6 +64,13 @@ class LcVpnService : VpnService() {
         if (isStarting.getAndSet(true)) return
         state.value = ConnectionState.Connecting
 
+        // Android kills the process with ForegroundServiceDidNotStartInTimeException if
+        // startForeground() isn't called within a few seconds of Context.startForegroundService()
+        // - and killing it mid-connection leaves Xray-core's socket in TIME_WAIT, which is why
+        // every retry after that failed with "address already in use". So this must happen
+        // synchronously, immediately, before any of the slower async setup below.
+        startForeground(NOTIFICATION_ID, buildConnectingNotification())
+
         scope.launch {
             runCatching {
                 val db = AppDatabase.get(this@LcVpnService)
@@ -102,6 +109,7 @@ class LcVpnService : VpnService() {
             }.onFailure { e ->
                 Timber.e(e, "Failed to connect")
                 state.value = ConnectionState.Error(e.message ?: "Unknown error")
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
             isStarting.set(false)
@@ -188,29 +196,42 @@ class LcVpnService : VpnService() {
         super.onRevoke()
     }
 
-    private fun buildNotification(serverName: String, connectedAt: Long, stats: ProxyStats): Notification {
-        val manager = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(CHANNEL_ID, "LC VPN", NotificationManager.IMPORTANCE_LOW)
-            manager.createNotificationChannel(channel)
-        }
+    private fun buildConnectingNotification(): Notification {
+        ensureNotificationChannel()
+        return baseNotificationBuilder()
+            .setContentTitle("LC VPN")
+            .setContentText("Подключение...")
+            .build()
+    }
 
+    private fun buildNotification(serverName: String, connectedAt: Long, stats: ProxyStats): Notification {
+        ensureNotificationChannel()
+        val elapsed = Formatting.elapsed(connectedAt)
+        val speedLine = "↓ ${Formatting.speed(stats.downlinkBytesPerSec)}   ↑ ${Formatting.speed(stats.uplinkBytesPerSec)}"
+
+        return baseNotificationBuilder()
+            .setContentTitle("$serverName · $elapsed")
+            .setContentText(speedLine)
+            .build()
+    }
+
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "LC VPN", NotificationManager.IMPORTANCE_LOW))
+        }
+    }
+
+    private fun baseNotificationBuilder(): NotificationCompat.Builder {
         val contentIntent = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val elapsed = Formatting.elapsed(connectedAt)
-        val speedLine = "↓ ${Formatting.speed(stats.downlinkBytesPerSec)}   ↑ ${Formatting.speed(stats.uplinkBytesPerSec)}"
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("$serverName · $elapsed")
-            .setContentText(speedLine)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
-            .build()
     }
 
     companion object {
