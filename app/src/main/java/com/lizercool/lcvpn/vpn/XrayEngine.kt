@@ -37,60 +37,76 @@ class XrayEngine : ProxyEngine {
         runCatching { controller?.stopLoop() }
         controller = null
 
-        runCatching {
-            val callback = object : CoreCallbackHandler {
-                override fun startup(): Long {
-                    Timber.d("Xray-core startup callback")
-                    return 0
-                }
-                override fun shutdown(): Long {
-                    Timber.d("Xray-core shutdown callback")
-                    return 0
-                }
-                override fun onEmitStatus(code: Long, message: String?): Long {
-                    Timber.d("Xray-core status %d: %s", code, message)
-                    return 0
-                }
-            }
+        for (attempt in 1..START_ATTEMPTS) {
+            val result = runCatching { startOnce(configJson, tunFd) }
+            if (result.isSuccess) return@withContext true
 
-            val coreController = Libv2ray.newCoreController(callback)
-            try {
-                coreController.startLoop(configJson, tunFd ?: 0)
-            } catch (e: Throwable) {
-                // startLoop() can partially bind ports before failing; release them so the
-                // next attempt doesn't hit "address already in use" forever.
-                runCatching { coreController.stopLoop() }
-                throw e
+            val error = result.exceptionOrNull()
+            if (attempt == START_ATTEMPTS) {
+                Timber.e(error, "Failed to start Xray-core after %d attempts", START_ATTEMPTS)
+            } else {
+                // A port bind failure is often transient (e.g. the previous socket is still in
+                // TCP TIME_WAIT after a prior disconnect) and clears up within a couple of
+                // seconds, so it's worth a few retries before giving up outright.
+                Timber.w(error, "Xray-core start attempt %d/%d failed, retrying", attempt, START_ATTEMPTS)
+                delay(RETRY_DELAY_MS)
             }
-            controller = coreController
+        }
+        false
+    }
 
-            var totalUplink = 0L
-            var totalDownlink = 0L
-            statsJob = scope.launch {
-                while (true) {
-                    delay(1000)
-                    runCatching {
-                        // QueryStats resets the counter on read, so each call already returns
-                        // the delta transferred since the previous call.
-                        val uplinkDelta = coreController.queryStats("proxy", "uplink")
-                        val downlinkDelta = coreController.queryStats("proxy", "downlink")
-                        totalUplink += uplinkDelta
-                        totalDownlink += downlinkDelta
-                        _stats.value = ProxyStats(
-                            downlinkBytesPerSec = downlinkDelta,
-                            uplinkBytesPerSec = uplinkDelta,
-                            totalDownlinkBytes = totalDownlink,
-                            totalUplinkBytes = totalUplink,
-                        )
-                    }.onFailure { Timber.w(it, "Failed to query Xray-core stats") }
-                }
+    private fun startOnce(configJson: String, tunFd: Int?) {
+        val callback = object : CoreCallbackHandler {
+            override fun startup(): Long {
+                Timber.d("Xray-core startup callback")
+                return 0
             }
+            override fun shutdown(): Long {
+                Timber.d("Xray-core shutdown callback")
+                return 0
+            }
+            override fun onEmitStatus(code: Long, message: String?): Long {
+                Timber.d("Xray-core status %d: %s", code, message)
+                return 0
+            }
+        }
 
-            Timber.i("Xray-core started via CoreController.startLoop")
-            true
-        }.onFailure {
-            Timber.e(it, "Failed to start Xray-core")
-        }.getOrDefault(false)
+        val coreController = Libv2ray.newCoreController(callback)
+        try {
+            coreController.startLoop(configJson, tunFd ?: 0)
+        } catch (e: Throwable) {
+            // startLoop() can partially bind ports before failing; release them so the
+            // next attempt doesn't hit "address already in use" forever.
+            runCatching { coreController.stopLoop() }
+            throw e
+        }
+        controller = coreController
+        startStatsJob(coreController)
+        Timber.i("Xray-core started via CoreController.startLoop")
+    }
+
+    private fun startStatsJob(coreController: CoreController) {
+        var totalUplink = 0L
+        var totalDownlink = 0L
+        statsJob = scope.launch {
+            while (true) {
+                delay(1000)
+                runCatching {
+                    // QueryStats resets the counter on read, so each call already returns
+                    // the delta transferred since the previous call.
+                    val uplinkDelta = coreController.queryStats("proxy", "uplink")
+                    val downlinkDelta = coreController.queryStats("proxy", "downlink")
+                    totalUplink += uplinkDelta
+                    totalDownlink += downlinkDelta
+                    _stats.value = ProxyStats(
+                        downlinkBytesPerSec = downlinkDelta,
+                        uplinkBytesPerSec = uplinkDelta,
+                        totalDownlinkBytes = totalDownlink,
+                        totalUplinkBytes = totalUplink,
+                    )
+                }.onFailure { Timber.w(it, "Failed to query Xray-core stats") }
+            }
+        }
     }
 
     override suspend fun stop() = withContext(Dispatchers.IO) {
@@ -103,4 +119,9 @@ class XrayEngine : ProxyEngine {
     }
 
     override fun isRunning(): Boolean = controller?.isRunning ?: false
+
+    companion object {
+        private const val START_ATTEMPTS = 4
+        private const val RETRY_DELAY_MS = 1500L
+    }
 }
