@@ -17,6 +17,15 @@ interface ServerDao {
     @Query("SELECT * FROM servers WHERE isSelected = 1 LIMIT 1")
     fun observeSelected(): Flow<ServerEntity?>
 
+    @Query("SELECT * FROM servers WHERE subscriptionId = :subscriptionId AND isSelected = 1 LIMIT 1")
+    suspend fun selectedInSubscription(subscriptionId: Long): ServerEntity?
+
+    @Query("SELECT COUNT(*) FROM servers WHERE isSelected = 1")
+    suspend fun selectedCount(): Int
+
+    @Query("SELECT * FROM servers ORDER BY id ASC LIMIT 1")
+    suspend fun firstServer(): ServerEntity?
+
     @Query("SELECT * FROM servers WHERE subscriptionId = :subscriptionId")
     suspend fun bySubscription(subscriptionId: Long): List<ServerEntity>
 
@@ -37,6 +46,9 @@ interface ServerDao {
 
     @Query("UPDATE servers SET isSelected = 1 WHERE id = :serverId")
     suspend fun select(serverId: Long)
+
+    @Query("UPDATE servers SET isSelected = 1 WHERE subscriptionId = :subscriptionId AND address = :address AND port = :port")
+    suspend fun selectByAddressPort(subscriptionId: Long, address: String, port: Int)
 
     @Query("UPDATE servers SET lastPingMs = :pingMs WHERE id = :serverId")
     suspend fun updatePing(serverId: Long, pingMs: Int?)

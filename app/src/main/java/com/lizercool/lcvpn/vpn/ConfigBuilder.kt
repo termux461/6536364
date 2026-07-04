@@ -13,7 +13,13 @@ import org.json.JSONObject
  */
 object ConfigBuilder {
 
-    fun build(server: ServerEntity, tunnelMode: TunnelMode, socksPort: Int): String {
+    fun build(
+        server: ServerEntity,
+        tunnelMode: TunnelMode,
+        socksPort: Int,
+        lanProxyPort: Int = 0,
+        lanProxyPassword: String? = null,
+    ): String {
         val root = JSONObject()
         root.put("log", JSONObject().put("loglevel", "warning"))
 
@@ -26,6 +32,27 @@ object ConfigBuilder {
                 .put("protocol", "socks")
                 .put("settings", JSONObject().put("udp", true)),
         )
+        if (tunnelMode == TunnelMode.TUN_AND_PROXY && lanProxyPort > 0 && !lanProxyPassword.isNullOrEmpty()) {
+            inbounds.put(
+                JSONObject()
+                    .put("tag", "socks-in-lan")
+                    .put("port", lanProxyPort)
+                    .put("listen", "0.0.0.0")
+                    .put("protocol", "socks")
+                    .put(
+                        "settings",
+                        JSONObject()
+                            .put("udp", true)
+                            .put("auth", "password")
+                            .put(
+                                "accounts",
+                                JSONArray().put(
+                                    JSONObject().put("user", "lcvpn").put("pass", lanProxyPassword),
+                                ),
+                            ),
+                    ),
+            )
+        }
         root.put("inbounds", inbounds)
 
         val outbounds = JSONArray()

@@ -104,16 +104,32 @@ private fun ConnectionTab(viewModel: SettingsViewModel) {
     val tunnelMode by viewModel.tunnelMode.collectAsState()
     val appRoutingMode by viewModel.appRoutingMode.collectAsState()
     val selectedPackages by viewModel.selectedPackages.collectAsState()
+    val lanProxyPassword by viewModel.lanProxyPassword.collectAsState()
     var query by remember { mutableStateOf("") }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         item {
             SectionLabel("РЕЖИМ ТУННЕЛЯ")
             SegmentedRow(
-                options = listOf(TunnelMode.PROXY to "Прокси", TunnelMode.TUN to "TUN (полный VPN)"),
+                options = listOf(
+                    TunnelMode.PROXY to "Прокси",
+                    TunnelMode.TUN to "TUN (полный VPN)",
+                    TunnelMode.TUN_AND_PROXY to "TUN + прокси",
+                ),
                 selected = tunnelMode,
                 onSelect = viewModel::setTunnelMode,
             )
+            if (tunnelMode == TunnelMode.TUN_AND_PROXY) {
+                Text(
+                    "Полный VPN на все приложения + SOCKS5-прокси в локальной сети, " +
+                        "чтобы этим же подключением мог пользоваться другой телефон/ПК на том же Wi-Fi.\n\n" +
+                        "Адрес: ${viewModel.lanProxyAddress}\n" +
+                        "Логин: lcvpn\n" +
+                        "Пароль: $lanProxyPassword",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                )
+            }
 
             SectionLabel("ЧТО ПУСКАТЬ ЧЕРЕЗ VPN")
             SegmentedRow(

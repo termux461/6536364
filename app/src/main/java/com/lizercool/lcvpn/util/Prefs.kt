@@ -26,6 +26,7 @@ class Prefs(private val context: Context) {
         val TUNNEL_MODE = stringPreferencesKey("tunnel_mode")
         val APP_ROUTING_MODE = stringPreferencesKey("app_routing_mode")
         val ANNOUNCEMENT_SEEN_VERSION = stringPreferencesKey("announcement_seen_version")
+        val LAN_PROXY_PASSWORD = stringPreferencesKey("lan_proxy_password")
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -62,4 +63,13 @@ class Prefs(private val context: Context) {
 
     suspend fun markAnnouncementSeen(version: String) =
         context.dataStore.edit { it[Keys.ANNOUNCEMENT_SEEN_VERSION] = version }
+
+    /** Generated once on first use of TUN + Proxy mode and reused after that, so LAN clients can be set up once. */
+    suspend fun lanProxyPassword(): String {
+        val existing = context.dataStore.data.map { it[Keys.LAN_PROXY_PASSWORD] }.first()
+        if (existing != null) return existing
+        val generated = (1..12).map { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".random() }.joinToString("")
+        context.dataStore.edit { it[Keys.LAN_PROXY_PASSWORD] = generated }
+        return generated
+    }
 }

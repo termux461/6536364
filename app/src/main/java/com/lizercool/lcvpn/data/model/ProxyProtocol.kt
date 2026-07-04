@@ -14,7 +14,7 @@ enum class ProxyProtocol(val label: String) {
     }
 }
 
-enum class TunnelMode { PROXY, TUN }
+enum class TunnelMode { PROXY, TUN, TUN_AND_PROXY }
 
 enum class AppRoutingMode { ALL_EXCEPT_SELECTED, ONLY_SELECTED }
 

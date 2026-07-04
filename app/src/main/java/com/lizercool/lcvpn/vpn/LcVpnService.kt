@@ -62,20 +62,25 @@ class LcVpnService : VpnService() {
 
                 val tunnelMode = prefs.tunnelMode.first()
                 val socksPort = 10808
-                val configJson = ConfigBuilder.build(server, tunnelMode, socksPort)
+                val usesTun = tunnelMode == TunnelMode.TUN || tunnelMode == TunnelMode.TUN_AND_PROXY
+                val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
+                val configJson = ConfigBuilder.build(server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
 
                 var tunFd: Int? = null
-                if (tunnelMode == TunnelMode.TUN) {
+                if (usesTun) {
                     tunFd = establishTun(prefs)
                 }
 
                 val started = engine.start(configJson, tunFd)
                 if (!started) error("Proxy engine failed to start")
 
-                if (tunnelMode == TunnelMode.TUN && tunFd != null) {
+                if (usesTun && tunFd != null) {
                     HevSocks5Tunnel.start(this@LcVpnService, tunFd, socksPort, TUN_MTU, TUN_ADDRESS)
                     tun2SocksRunning = true
                     Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tunFd, socksPort)
+                }
+                if (tunnelMode == TunnelMode.TUN_AND_PROXY) {
+                    Timber.i("LAN proxy listening on 0.0.0.0:%d (user=lcvpn)", LAN_PROXY_PORT)
                 }
 
                 val connectedAt = System.currentTimeMillis()
@@ -202,6 +207,7 @@ class LcVpnService : VpnService() {
         private const val NOTIFICATION_ID = 1
         private const val TUN_ADDRESS = "10.10.10.1"
         private const val TUN_MTU = 1500
+        const val LAN_PROXY_PORT = 10809
 
         val state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
         val stateFlow: StateFlow<ConnectionState> = state

@@ -64,8 +64,20 @@ class SubscriptionRepository(
 
                 if (servers.isEmpty()) error("No servers parsed from subscription body")
 
+                // Refresh replaces every row (ids reset), so the previous selection would
+                // otherwise silently disappear - remember it by address+port and restore it
+                // on the matching new row once inserted.
+                val previouslySelected = serverDao.selectedInSubscription(subscription.id)
+
                 serverDao.deleteBySubscription(subscription.id)
                 serverDao.insertAll(servers)
+
+                if (previouslySelected != null) {
+                    serverDao.selectByAddressPort(subscription.id, previouslySelected.address, previouslySelected.port)
+                }
+                if (serverDao.selectedCount() == 0) {
+                    serverDao.firstServer()?.let { serverDao.select(it.id) }
+                }
 
                 subscriptionDao.update(
                     subscription.copy(

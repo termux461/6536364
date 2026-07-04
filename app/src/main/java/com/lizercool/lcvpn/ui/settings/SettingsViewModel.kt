@@ -8,10 +8,13 @@ import com.lizercool.lcvpn.data.db.entity.AppRoutingRuleEntity
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
+import com.lizercool.lcvpn.util.LanAddress
 import com.lizercool.lcvpn.util.LogSharing
 import com.lizercool.lcvpn.util.Prefs
 import com.lizercool.lcvpn.vpn.AppRoutingManager
 import com.lizercool.lcvpn.vpn.InstalledAppInfo
+import com.lizercool.lcvpn.vpn.LcVpnService
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -36,6 +39,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val selectedPackages: StateFlow<Set<String>> = db.appRoutingRuleDao().observeAll()
         .map { list -> list.map { it.packageName }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    val lanProxyAddress: String get() = "${LanAddress.current() ?: "?.?.?.?"}:${LcVpnService.LAN_PROXY_PORT}"
+
+    private val _lanProxyPassword = MutableStateFlow("")
+    val lanProxyPassword: StateFlow<String> = _lanProxyPassword
+
+    init {
+        viewModelScope.launch { _lanProxyPassword.value = prefs.lanProxyPassword() }
+    }
 
     fun setLanguage(value: String) = viewModelScope.launch { prefs.setLanguage(value) }
     fun setDarkTheme(value: Boolean) = viewModelScope.launch { prefs.setDarkTheme(value) }
