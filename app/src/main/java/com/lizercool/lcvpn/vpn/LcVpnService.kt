@@ -32,7 +32,7 @@ class LcVpnService : VpnService() {
 
     private val serviceJob = Job()
     private val scope = CoroutineScope(Dispatchers.Main + serviceJob)
-    private val engine: ProxyEngine by lazy { XrayEngine(this) }
+    private val engine: ProxyEngine by lazy { XrayEngine() }
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
     private var notificationTickerJob: Job? = null
