@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -35,6 +36,7 @@ import com.lizercool.lcvpn.data.model.TunnelMode
 
 private val tabTitles = listOf("Общие", "Подключение", "Маршрутизация", "Анти-DPI", "О прил.")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }

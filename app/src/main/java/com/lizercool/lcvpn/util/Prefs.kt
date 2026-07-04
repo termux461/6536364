@@ -9,6 +9,7 @@ import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "lcvpn_prefs")
@@ -52,7 +53,7 @@ class Prefs(private val context: Context) {
         context.dataStore.edit { it[Keys.APP_ROUTING_MODE] = value.name }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
-        val seen = kotlinx.coroutines.flow.first(context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] })
+        val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()
         return seen == version
     }
 
