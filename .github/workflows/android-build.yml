@@ -32,7 +32,7 @@ jobs:
 
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
-          # `go install .../gomobile@latest` may need a newer Go than actions/setup-go gave us -
+          # `go install .../gomobile@latest` needs a newer Go than actions/setup-go gave us -
           # let GOTOOLCHAIN=auto fetch whatever that install needs, same as any other `go install`.
           go install golang.org/x/mobile/cmd/gomobile@latest
           go install golang.org/x/mobile/cmd/gobind@latest
@@ -43,12 +43,10 @@ jobs:
           cd /tmp/AndroidLibXrayLite
           mkdir -p "$GITHUB_WORKSPACE/app/libs"
 
-          # But pin the actual target build back to exactly the Go version actions/setup-go
-          # installed, whatever that auto-fetch above pulled in for the gomobile/gobind install
-          # itself. A previous run's toolchain drifted to a newer Go here and broke
-          # github.com/wlynxg/anet ("invalid reference to net.zoneCache", a go:linkname hack
-          # into a private net package symbol that not every Go version supports).
-          export GOTOOLCHAIN=go1.22.12
+          # This gomobile version models x/mobile as a go.mod "tool dependency" that
+          # AndroidLibXrayLite's own go.mod doesn't declare - `gomobile bind` said so directly
+          # and named the fix.
+          go get -tool golang.org/x/mobile/cmd/gobind
           gomobile bind -v -androidapi 24 -target=android -o "$GITHUB_WORKSPACE/app/libs/libv2ray.aar" .
 
       - name: Grant execute permission for gradlew
