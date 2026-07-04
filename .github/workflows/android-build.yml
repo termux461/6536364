@@ -33,6 +33,29 @@ jobs:
           fileName: "libv2ray.aar"
           out-file-path: "app/libs"
 
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;26.1.10909125"
+          echo "NDK_DIR=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Build libhev-socks5-tunnel.so (tun2socks bridge for TUN mode)
+        # Plain C, built with ndk-build - none of the Go/gomobile toolchain drama from
+        # libv2ray.aar applies here. Same library v2rayNG uses (see its TProxyService.kt),
+        # bridging the VpnService tun fd to Xray-core's local SOCKS inbound.
+        run: |
+          git clone --quiet --recurse-submodules --depth=1 https://github.com/heiher/hev-socks5-tunnel.git /tmp/hev-socks5-tunnel
+          cd /tmp/hev-socks5-tunnel
+          "$NDK_DIR/ndk-build" \
+            NDK_PROJECT_PATH="$(pwd)" \
+            APP_BUILD_SCRIPT="$(pwd)/Android.mk" \
+            NDK_APPLICATION_MK="$(pwd)/Application.mk"
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs"
+          for abi_dir in libs/*/; do
+            abi="$(basename "$abi_dir")"
+            mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi"
+            cp "$abi_dir/libhev-socks5-tunnel.so" "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi/"
+          done
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 

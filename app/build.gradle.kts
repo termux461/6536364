@@ -50,12 +50,15 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
 dependencies {
-    // Built by CI (see .github/workflows/android-build.yml) via `gomobile bind` against
-    // github.com/2dust/AndroidLibXrayLite - not present for local/offline builds.
+    // Downloaded by CI (see .github/workflows/android-build.yml) from AndroidLibXrayLite's
+    // GitHub Releases - not present for local/offline builds.
     implementation(files("libs/libv2ray.aar"))
 
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")

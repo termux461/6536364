@@ -36,6 +36,7 @@ class LcVpnService : VpnService() {
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
     private var notificationTickerJob: Job? = null
+    private var tun2SocksRunning = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -65,16 +66,17 @@ class LcVpnService : VpnService() {
 
                 var tunFd: Int? = null
                 if (tunnelMode == TunnelMode.TUN) {
-                    Timber.w(
-                        "TUN mode captures all device traffic into a tun fd, but no " +
-                            "tun2socks bridge is wired in yet - captured packets go nowhere " +
-                            "and the device will appear to lose internet access while connected.",
-                    )
                     tunFd = establishTun(prefs)
                 }
 
                 val started = engine.start(configJson, tunFd)
                 if (!started) error("Proxy engine failed to start")
+
+                if (tunnelMode == TunnelMode.TUN && tunFd != null) {
+                    HevSocks5Tunnel.start(this@LcVpnService, tunFd, socksPort, TUN_MTU, TUN_ADDRESS)
+                    tun2SocksRunning = true
+                    Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tunFd, socksPort)
+                }
 
                 val connectedAt = System.currentTimeMillis()
                 startForeground(NOTIFICATION_ID, buildNotification(server.name, connectedAt, engine.stats.value))
@@ -93,11 +95,11 @@ class LcVpnService : VpnService() {
     private suspend fun establishTun(prefs: Prefs): Int {
         val builder = Builder()
             .setSession(getString(R.string.app_name))
-            .addAddress("10.10.10.1", 32)
+            .addAddress(TUN_ADDRESS, 32)
             .addRoute("0.0.0.0", 0)
             .addDnsServer("1.1.1.1")
             .addDnsServer("8.8.8.8")
-            .setMtu(1500)
+            .setMtu(TUN_MTU)
 
         applyAppRouting(builder, prefs)
 
@@ -136,6 +138,7 @@ class LcVpnService : VpnService() {
     private fun disconnect() {
         notificationTickerJob?.cancel()
         notificationTickerJob = null
+        stopTun2Socks()
         scope.launch {
             engine.stop()
             parcelFileDescriptor?.close()
@@ -148,8 +151,15 @@ class LcVpnService : VpnService() {
         stopSelf()
     }
 
+    private fun stopTun2Socks() {
+        if (!tun2SocksRunning) return
+        runCatching { HevSocks5Tunnel.stop() }.onFailure { Timber.w(it, "Failed to stop hev-socks5-tunnel cleanly") }
+        tun2SocksRunning = false
+    }
+
     override fun onDestroy() {
         notificationTickerJob?.cancel()
+        stopTun2Socks()
         serviceJob.cancel()
         parcelFileDescriptor?.close()
         super.onDestroy()
@@ -190,6 +200,8 @@ class LcVpnService : VpnService() {
         const val ACTION_DISCONNECT = "com.lizercool.lcvpn.DISCONNECT"
         private const val CHANNEL_ID = "lcvpn_status"
         private const val NOTIFICATION_ID = 1
+        private const val TUN_ADDRESS = "10.10.10.1"
+        private const val TUN_MTU = 1500
 
         val state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
         val stateFlow: StateFlow<ConnectionState> = state

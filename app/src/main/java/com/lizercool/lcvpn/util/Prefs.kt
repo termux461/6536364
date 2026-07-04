@@ -36,10 +36,9 @@ class Prefs(private val context: Context) {
     val connectOnLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.CONNECT_ON_LAUNCH] ?: false }
     val updateOnLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.UPDATE_ON_LAUNCH] ?: false }
     val tunnelMode: Flow<TunnelMode> = context.dataStore.data.map {
-        // Defaults to PROXY: TUN mode captures all system traffic into a tun fd that nothing
-        // reads from yet (no tun2socks bridge wired in), which would silently cut off the
-        // device's internet the moment someone connects. Switch this back to TUN once that
-        // bridge exists.
+        // Defaults to PROXY until TUN mode (now bridged via hev-socks5-tunnel, see
+        // LcVpnService) has been confirmed working on a real device - flip this default once
+        // that's verified.
         runCatching { TunnelMode.valueOf(it[Keys.TUNNEL_MODE] ?: "") }.getOrDefault(TunnelMode.PROXY)
     }
     val appRoutingMode: Flow<AppRoutingMode> = context.dataStore.data.map {
