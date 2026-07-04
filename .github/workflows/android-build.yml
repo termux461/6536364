@@ -22,8 +22,11 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          sdkmanager --install "ndk;26.1.10909125"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          # r26's bundled lld is the one remaining untested variable in the anet link failure -
+          # Go version and target ABI are both ruled out now (identical failure on 1.22/1.23/1.25
+          # and on both armeabi-v7a and arm64-v8a). Trying the older r25c LTS line instead.
+          sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> "$GITHUB_ENV"
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -33,13 +36,9 @@ jobs:
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
           # github.com/wlynxg/anet's go:linkname hack into net.zoneCache fails to link
-          # ("invalid reference to net.zoneCache") - identically under Go 1.22, 1.23, and
-          # whatever 1.25 gomobile@latest pulled in, which rules out Go version as the cause
-          # (that was the working theory for several rounds; it wasn't it). `gomobile bind`
-          # builds one Android ABI at a time and aborts on the first failure, and the one
-          # visible failing ABI so far is armeabi-v7a (32-bit ARM) - so this round tests
-          # whether it's arch-specific by building only android/arm64 (which covers effectively
-          # all real devices anyway) instead of the default all-ABI `-target=android`.
+          # ("invalid reference to net.zoneCache") identically under Go 1.22/1.23/1.25 and on
+          # both armeabi-v7a and arm64-v8a - ruling out both Go version and target ABI as the
+          # cause. Only NDK version (r26's lld) is left untested; see the NDK install step above.
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250210185054-b38b8813d607
           go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250210185054-b38b8813d607
           export PATH="$(go env GOPATH)/bin:$PATH"
