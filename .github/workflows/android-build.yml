@@ -28,21 +28,22 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.22"
 
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
-          # `gomobile@latest` currently requires Go >= 1.25, which breaks
-          # github.com/wlynxg/anet (a go:linkname hack into net.zoneCache that Go 1.25 no longer
-          # allows) - and anet's last release (v0.0.5, 2024-10-04) predates any fix for that, so
-          # bumping the dependency isn't an option. Pinning gomobile/gobind instead to the last
-          # commit whose go.mod still only requires go 1.22 (found via `git log -- go.mod` on
-          # github.com/golang/mobile) avoids the whole Go 1.25 code path. That go.mod's
-          # `godebug` directive still needs a parser newer than 1.22 itself to read (1.22 errors
-          # with "unknown directive: godebug"), so setup-go above is 1.23 - newer than the
-          # module's own stated minimum, still short of the 1.25 that breaks anet.
-          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250218170336-ba142f8e7d3c
-          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250218170336-ba142f8e7d3c
+          # github.com/wlynxg/anet does a go:linkname hack into net.zoneCache that breaks under
+          # Go's stricter -checklinkname enforcement - which turned out to start at Go 1.23, not
+          # just 1.25 as first assumed (same error still hit under Go 1.23 with a newer gomobile
+          # pin). anet's last release (v0.0.5, 2024-10-04) predates any fix for that, so the only
+          # way to keep it working is to stay on Go 1.22 throughout, no exceptions.
+          #
+          # The previous pin (ba142f8) was the commit that *introduced* a `godebug` directive
+          # Go 1.22 can't parse, forcing a newer parser (and thus back into -checklinkname
+          # territory). Pinning to its parent commit instead - the last one with neither problem
+          # (found via `git log -S"godebug gotypesalias" -- go.mod` on github.com/golang/mobile).
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250210185054-b38b8813d607
+          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250210185054-b38b8813d607
           export PATH="$(go env GOPATH)/bin:$PATH"
           gomobile init
 
