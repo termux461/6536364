@@ -79,7 +79,13 @@ class LcVpnService : VpnService() {
                     ?: error("No server selected")
 
                 val tunnelMode = prefs.tunnelMode.first()
-                val socksPort = 10808
+                // Not hardcoded to the conventional 10808: that's the default local SOCKS port
+                // for many v2ray/xray-based apps, so if another one is also running it can
+                // squat that exact port with nothing we can do about it (we can't stop another
+                // app's process). This port is purely internal - hev-socks5-tunnel is the only
+                // other thing that needs to know it - so a fresh free port each connect avoids
+                // that collision entirely.
+                val socksPort = findFreeLoopbackPort()
                 val usesTun = tunnelMode == TunnelMode.TUN || tunnelMode == TunnelMode.TUN_AND_PROXY
                 val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
                 val configJson = ConfigBuilder.build(server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
@@ -123,6 +129,9 @@ class LcVpnService : VpnService() {
             isStarting.set(false)
         }
     }
+
+    private fun findFreeLoopbackPort(): Int =
+        java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
 
     private suspend fun establishTun(prefs: Prefs): Int {
         val builder = Builder()
