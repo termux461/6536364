@@ -28,7 +28,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.23"
 
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
@@ -37,7 +37,10 @@ jobs:
           # allows) - and anet's last release (v0.0.5, 2024-10-04) predates any fix for that, so
           # bumping the dependency isn't an option. Pinning gomobile/gobind instead to the last
           # commit whose go.mod still only requires go 1.22 (found via `git log -- go.mod` on
-          # github.com/golang/mobile) avoids the whole Go 1.25 code path.
+          # github.com/golang/mobile) avoids the whole Go 1.25 code path. That go.mod's
+          # `godebug` directive still needs a parser newer than 1.22 itself to read (1.22 errors
+          # with "unknown directive: godebug"), so setup-go above is 1.23 - newer than the
+          # module's own stated minimum, still short of the 1.25 that breaks anet.
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250218170336-ba142f8e7d3c
           go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250218170336-ba142f8e7d3c
           export PATH="$(go env GOPATH)/bin:$PATH"
