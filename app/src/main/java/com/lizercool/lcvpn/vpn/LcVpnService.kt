@@ -14,13 +14,16 @@ import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
+import com.lizercool.lcvpn.util.Formatting
 import com.lizercool.lcvpn.util.Prefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import java.util.concurrent.atomic.AtomicBoolean
@@ -32,6 +35,7 @@ class LcVpnService : VpnService() {
     private val engine: ProxyEngine = StubProxyEngine()
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
+    private var notificationTickerJob: Job? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -67,8 +71,10 @@ class LcVpnService : VpnService() {
                 val started = engine.start(configJson, tunFd)
                 if (!started) error("Proxy engine failed to start")
 
-                startForeground(NOTIFICATION_ID, buildNotification(server.name))
-                state.value = ConnectionState.Connected(System.currentTimeMillis(), server.name)
+                val connectedAt = System.currentTimeMillis()
+                startForeground(NOTIFICATION_ID, buildNotification(server.name, connectedAt, engine.stats.value))
+                state.value = ConnectionState.Connected(connectedAt, server.name)
+                startNotificationTicker(server.name, connectedAt)
                 Timber.i("VPN connected to %s (%s mode)", server.name, tunnelMode)
             }.onFailure { e ->
                 Timber.e(e, "Failed to connect")
@@ -109,12 +115,28 @@ class LcVpnService : VpnService() {
         }.onFailure { Timber.w(it, "Failed applying per-app routing rule") }
     }
 
+    private fun startNotificationTicker(serverName: String, connectedAt: Long) {
+        notificationTickerJob?.cancel()
+        notificationTickerJob = scope.launch {
+            val manager = getSystemService(NotificationManager::class.java)
+            while (isActive) {
+                val stats = engine.stats.value
+                _stats.value = stats
+                manager.notify(NOTIFICATION_ID, buildNotification(serverName, connectedAt, stats))
+                delay(1000)
+            }
+        }
+    }
+
     private fun disconnect() {
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
         scope.launch {
             engine.stop()
             parcelFileDescriptor?.close()
             parcelFileDescriptor = null
             state.value = ConnectionState.Disconnected
+            _stats.value = ProxyStats()
             Timber.i("VPN disconnected")
         }
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -122,6 +144,7 @@ class LcVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        notificationTickerJob?.cancel()
         serviceJob.cancel()
         parcelFileDescriptor?.close()
         super.onDestroy()
@@ -132,7 +155,7 @@ class LcVpnService : VpnService() {
         super.onRevoke()
     }
 
-    private fun buildNotification(serverName: String): Notification {
+    private fun buildNotification(serverName: String, connectedAt: Long, stats: ProxyStats): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(CHANNEL_ID, "LC VPN", NotificationManager.IMPORTANCE_LOW)
@@ -144,11 +167,15 @@ class LcVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val elapsed = Formatting.elapsed(connectedAt)
+        val speedLine = "↓ ${Formatting.speed(stats.downlinkBytesPerSec)}   ↑ ${Formatting.speed(stats.uplinkBytesPerSec)}"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle(getString(R.string.status_protected))
-            .setContentText(serverName)
+            .setContentTitle("$serverName · $elapsed")
+            .setContentText(speedLine)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)
             .build()
     }
@@ -161,5 +188,8 @@ class LcVpnService : VpnService() {
 
         val state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
         val stateFlow: StateFlow<ConnectionState> = state
+
+        private val _stats = MutableStateFlow(ProxyStats())
+        val statsFlow: StateFlow<ProxyStats> = _stats
     }
 }

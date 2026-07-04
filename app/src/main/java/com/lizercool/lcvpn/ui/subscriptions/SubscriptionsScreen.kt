@@ -40,6 +40,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.data.db.entity.SubscriptionEntity
+import com.lizercool.lcvpn.util.Formatting
 import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,11 +110,11 @@ private fun SubscriptionCard(
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                 Column {
                     Text("ИСПОЛЬЗОВАНО", style = MaterialTheme.typography.labelSmall)
-                    Text(formatBytes(subscription.usedBytes))
+                    Text(Formatting.bytes(subscription.usedBytes))
                 }
                 Column {
                     Text("ЛИМИТ", style = MaterialTheme.typography.labelSmall)
-                    Text(subscription.limitBytes?.let { formatBytes(it) } ?: "Безлимит")
+                    Text(subscription.limitBytes?.let { Formatting.bytes(it) } ?: "Безлимит")
                 }
             }
             Spacer()
@@ -163,25 +164,13 @@ private fun AddSubscriptionDialog(
         },
         confirmButton = {
             androidx.compose.material3.TextButton(
-                onClick = { if (url.isNotBlank()) onConfirm(name.ifBlank { "WolfPN" }, url, isReserve) },
+                onClick = { if (url.isNotBlank()) onConfirm(name.ifBlank { "Lizercool" }, url, isReserve) },
             ) { Text("Добавить") }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
-}
-
-private fun formatBytes(bytes: Long): String {
-    if (bytes <= 0) return "0 Б"
-    val units = arrayOf("Б", "КБ", "МБ", "ГБ", "ТБ")
-    var value = bytes.toDouble()
-    var unitIndex = 0
-    while (value >= 1024 && unitIndex < units.lastIndex) {
-        value /= 1024
-        unitIndex++
-    }
-    return "%.1f %s".format(value, units[unitIndex])
 }
 
 private fun formatExpiry(epochMs: Long): String {

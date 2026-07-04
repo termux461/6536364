@@ -15,7 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -37,7 +40,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.R
+import com.lizercool.lcvpn.util.Formatting
 import com.lizercool.lcvpn.vpn.ConnectionState
+import com.lizercool.lcvpn.vpn.ProxyStats
 import kotlinx.coroutines.delay
 
 @Composable
@@ -84,6 +89,8 @@ fun HomeScreen(
 
         if (state is ConnectionState.Connected) {
             ElapsedTimer(sinceEpochMs = state.sinceEpochMs)
+            Spacer(Modifier.height(24.dp))
+            SpeedRow(uiState.stats)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -145,15 +152,43 @@ private fun ElapsedTimer(sinceEpochMs: Long) {
             delay(1000)
         }
     }
-    val totalSeconds = ((now - sinceEpochMs) / 1000).coerceAtLeast(0)
-    val minutes = totalSeconds / 60
-    val seconds = totalSeconds % 60
     Text(
-        "%02d:%02d".format(minutes, seconds),
+        Formatting.elapsed(sinceEpochMs, now),
         style = MaterialTheme.typography.headlineSmall,
         fontWeight = FontWeight.Bold,
         color = AccentGreenLocal,
     )
+}
+
+@Composable
+private fun SpeedRow(stats: ProxyStats) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        SpeedTile(
+            modifier = Modifier.weight(1f),
+            icon = Icons.Filled.ArrowDownward,
+            speedText = Formatting.speed(stats.downlinkBytesPerSec),
+            label = "ЗАГРУЗКА · ${Formatting.bytes(stats.totalDownlinkBytes)}",
+        )
+        SpeedTile(
+            modifier = Modifier.weight(1f),
+            icon = Icons.Filled.ArrowUpward,
+            speedText = Formatting.speed(stats.uplinkBytesPerSec),
+            label = "ОТДАЧА · ${Formatting.bytes(stats.totalUplinkBytes)}",
+        )
+    }
+}
+
+@Composable
+private fun SpeedTile(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, speedText: String, label: String) {
+    Card(modifier = modifier, shape = RoundedCornerShape(14.dp)) {
+        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = AccentGreenLocal, modifier = Modifier.size(20.dp))
+            Column(modifier = Modifier.padding(start = 8.dp)) {
+                Text(speedText, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+            }
+        }
+    }
 }
 
 private val AccentGreenLocal = Color(0xFF22C55E)
