@@ -28,32 +28,24 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: "1.22"
 
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
-          # `go install .../gomobile@latest` needs a newer Go than actions/setup-go gave us -
-          # let GOTOOLCHAIN=auto fetch whatever that install needs, same as any other `go install`.
-          go install golang.org/x/mobile/cmd/gomobile@latest
-          go install golang.org/x/mobile/cmd/gobind@latest
+          # `gomobile@latest` currently requires Go >= 1.25, which breaks
+          # github.com/wlynxg/anet (a go:linkname hack into net.zoneCache that Go 1.25 no longer
+          # allows) - and anet's last release (v0.0.5, 2024-10-04) predates any fix for that, so
+          # bumping the dependency isn't an option. Pinning gomobile/gobind instead to the last
+          # commit whose go.mod still only requires go 1.22 (found via `git log -- go.mod` on
+          # github.com/golang/mobile) avoids the whole Go 1.25 code path.
+          go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250218170336-ba142f8e7d3c
+          go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250218170336-ba142f8e7d3c
           export PATH="$(go env GOPATH)/bin:$PATH"
           gomobile init
 
           git clone --depth=1 https://github.com/2dust/AndroidLibXrayLite.git /tmp/AndroidLibXrayLite
           cd /tmp/AndroidLibXrayLite
           mkdir -p "$GITHUB_WORKSPACE/app/libs"
-
-          # This gomobile version models x/mobile as a go.mod "tool dependency" that
-          # AndroidLibXrayLite's own go.mod doesn't declare - `gomobile bind` said so directly
-          # and named the fix.
-          go get -tool golang.org/x/mobile/cmd/gobind
-
-          # github.com/wlynxg/anet's pinned version does a go:linkname hack into net.zoneCache
-          # that Go 1.25 (required by this gomobile) no longer allows. Bump just that dependency
-          # to whatever current release has adapted to the newer Go, then reconcile go.sum.
-          go get -u github.com/wlynxg/anet
-          go mod tidy
-
           gomobile bind -v -androidapi 24 -target=android -o "$GITHUB_WORKSPACE/app/libs/libv2ray.aar" .
 
       - name: Grant execute permission for gradlew
