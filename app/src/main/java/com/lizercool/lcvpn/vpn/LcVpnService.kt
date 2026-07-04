@@ -89,7 +89,15 @@ class LcVpnService : VpnService() {
                     tunFd = establishTun(prefs)
                 }
 
-                val started = engine.start(configJson, tunFd)
+                // Xray-core is only ever used here for its own local SOCKS inbound (see
+                // ConfigBuilder) - hev-socks5-tunnel is what bridges the raw tun fd separately,
+                // below. Handing the same tunFd to CoreController.startLoop() too makes
+                // AndroidLibXrayLite set the "xray.tun.fd" env var, which tells Xray-core's own
+                // dialer to also attach to that fd - two different native runtimes (Go's
+                // xray-core and hev-socks5-tunnel's C code) then fight over the same file
+                // descriptor, which is what was crashing the process a few seconds after every
+                // successful TUN connect with no catchable Kotlin exception.
+                val started = engine.start(configJson, null)
                 if (!started) error("Proxy engine failed to start")
 
                 if (usesTun && tunFd != null) {
