@@ -32,16 +32,14 @@ jobs:
 
       - name: Build libv2ray.aar (gomobile bind against AndroidLibXrayLite)
         run: |
-          # github.com/wlynxg/anet does a go:linkname hack into net.zoneCache that breaks under
-          # Go's stricter -checklinkname enforcement - which turned out to start at Go 1.23, not
-          # just 1.25 as first assumed (same error still hit under Go 1.23 with a newer gomobile
-          # pin). anet's last release (v0.0.5, 2024-10-04) predates any fix for that, so the only
-          # way to keep it working is to stay on Go 1.22 throughout, no exceptions.
-          #
-          # The previous pin (ba142f8) was the commit that *introduced* a `godebug` directive
-          # Go 1.22 can't parse, forcing a newer parser (and thus back into -checklinkname
-          # territory). Pinning to its parent commit instead - the last one with neither problem
-          # (found via `git log -S"godebug gotypesalias" -- go.mod` on github.com/golang/mobile).
+          # github.com/wlynxg/anet's go:linkname hack into net.zoneCache fails to link
+          # ("invalid reference to net.zoneCache") - identically under Go 1.22, 1.23, and
+          # whatever 1.25 gomobile@latest pulled in, which rules out Go version as the cause
+          # (that was the working theory for several rounds; it wasn't it). `gomobile bind`
+          # builds one Android ABI at a time and aborts on the first failure, and the one
+          # visible failing ABI so far is armeabi-v7a (32-bit ARM) - so this round tests
+          # whether it's arch-specific by building only android/arm64 (which covers effectively
+          # all real devices anyway) instead of the default all-ABI `-target=android`.
           go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20250210185054-b38b8813d607
           go install golang.org/x/mobile/cmd/gobind@v0.0.0-20250210185054-b38b8813d607
           export PATH="$(go env GOPATH)/bin:$PATH"
@@ -50,7 +48,7 @@ jobs:
           git clone --depth=1 https://github.com/2dust/AndroidLibXrayLite.git /tmp/AndroidLibXrayLite
           cd /tmp/AndroidLibXrayLite
           mkdir -p "$GITHUB_WORKSPACE/app/libs"
-          gomobile bind -v -androidapi 24 -target=android -o "$GITHUB_WORKSPACE/app/libs/libv2ray.aar" .
+          gomobile bind -v -androidapi 24 -target=android/arm64 -o "$GITHUB_WORKSPACE/app/libs/libv2ray.aar" .
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
