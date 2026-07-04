@@ -31,6 +31,12 @@ class XrayEngine : ProxyEngine {
     private val scope = CoroutineScope(Dispatchers.Main)
 
     override suspend fun start(configJson: String, tunFd: Int?): Boolean = withContext(Dispatchers.IO) {
+        // A previous start() may have thrown after Xray-core already bound its inbound ports
+        // internally; without releasing that leaked controller first, every retry fails with
+        // "address already in use" for the rest of the process's life.
+        runCatching { controller?.stopLoop() }
+        controller = null
+
         runCatching {
             val callback = object : CoreCallbackHandler {
                 override fun startup(): Long {
@@ -48,7 +54,14 @@ class XrayEngine : ProxyEngine {
             }
 
             val coreController = Libv2ray.newCoreController(callback)
-            coreController.startLoop(configJson, tunFd ?: 0)
+            try {
+                coreController.startLoop(configJson, tunFd ?: 0)
+            } catch (e: Throwable) {
+                // startLoop() can partially bind ports before failing; release them so the
+                // next attempt doesn't hit "address already in use" forever.
+                runCatching { coreController.stopLoop() }
+                throw e
+            }
             controller = coreController
 
             var totalUplink = 0L

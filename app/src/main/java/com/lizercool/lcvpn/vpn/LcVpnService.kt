@@ -16,6 +16,7 @@ import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
 import com.lizercool.lcvpn.util.Formatting
 import com.lizercool.lcvpn.util.Prefs
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,7 +32,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 class LcVpnService : VpnService() {
 
     private val serviceJob = Job()
-    private val scope = CoroutineScope(Dispatchers.Main + serviceJob)
+
+    // The notification ticker loop (below) runs unguarded every second for as long as the VPN
+    // is connected; without this handler, any exception it throws (e.g. from
+    // NotificationManager) is uncaught and kills the whole app process, which then just
+    // restarts and repeats - looks like the app "just crashes on launch" with no stack trace
+    // anywhere in the Timber-based log, since the crash happens before Timber's own
+    // uncaught-exception hook can log it.
+    private val exceptionHandler = CoroutineExceptionHandler { _, throwable ->
+        Timber.e(throwable, "Unhandled exception in LcVpnService coroutine scope")
+    }
+    private val scope = CoroutineScope(Dispatchers.Main + serviceJob + exceptionHandler)
     private val engine: ProxyEngine by lazy { XrayEngine() }
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
@@ -132,9 +143,11 @@ class LcVpnService : VpnService() {
         notificationTickerJob = scope.launch {
             val manager = getSystemService(NotificationManager::class.java)
             while (isActive) {
-                val stats = engine.stats.value
-                _stats.value = stats
-                manager.notify(NOTIFICATION_ID, buildNotification(serverName, connectedAt, stats))
+                runCatching {
+                    val stats = engine.stats.value
+                    _stats.value = stats
+                    manager.notify(NOTIFICATION_ID, buildNotification(serverName, connectedAt, stats))
+                }.onFailure { Timber.w(it, "Failed to update connection notification") }
                 delay(1000)
             }
         }

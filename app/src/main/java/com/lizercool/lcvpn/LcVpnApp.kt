@@ -10,5 +10,15 @@ class LcVpnApp : Application() {
         Timber.plant(Timber.DebugTree())
         Timber.plant(FileLogTree(this))
         Timber.i("LC VPN started, versionName=%s", BuildConfig.VERSION_NAME)
+
+        // Without this, an uncaught exception (JVM-level - not a native Xray-core crash) kills
+        // the process before Timber ever sees it, leaving the log file silent about why the app
+        // died. Log it, then hand off to the default handler so the crash still surfaces/reports
+        // normally.
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            Timber.e(throwable, "FATAL uncaught exception on thread %s", thread.name)
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
     }
 }
