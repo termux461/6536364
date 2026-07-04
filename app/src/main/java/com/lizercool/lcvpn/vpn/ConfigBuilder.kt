@@ -34,6 +34,18 @@ object ConfigBuilder {
         outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         root.put("outbounds", outbounds)
 
+        // Needed for V2RayPoint.queryStats("proxy", "uplink"/"downlink") to return real numbers.
+        root.put("stats", JSONObject())
+        root.put(
+            "policy",
+            JSONObject().put(
+                "system",
+                JSONObject()
+                    .put("statsOutboundUplink", true)
+                    .put("statsOutboundDownlink", true),
+            ),
+        )
+
         return root.toString()
     }
 

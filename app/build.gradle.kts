@@ -54,6 +54,10 @@ android {
 }
 
 dependencies {
+    // Built by CI (see .github/workflows/android-build.yml) via `gomobile bind` against
+    // github.com/2dust/AndroidLibXrayLite - not present for local/offline builds.
+    implementation(files("libs/libv2ray.aar"))
+
     val composeBom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

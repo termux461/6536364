@@ -32,7 +32,7 @@ class LcVpnService : VpnService() {
 
     private val serviceJob = Job()
     private val scope = CoroutineScope(Dispatchers.Main + serviceJob)
-    private val engine: ProxyEngine = StubProxyEngine()
+    private val engine: ProxyEngine by lazy { XrayEngine(this) }
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
     private var notificationTickerJob: Job? = null
@@ -65,6 +65,11 @@ class LcVpnService : VpnService() {
 
                 var tunFd: Int? = null
                 if (tunnelMode == TunnelMode.TUN) {
+                    Timber.w(
+                        "TUN mode captures all device traffic into a tun fd, but no " +
+                            "tun2socks bridge is wired in yet - captured packets go nowhere " +
+                            "and the device will appear to lose internet access while connected.",
+                    )
                     tunFd = establishTun(prefs)
                 }
 
