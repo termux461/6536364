@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -46,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.BuildConfig
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.PingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 
@@ -170,6 +172,21 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
                             "не переподключится.",
                     )
                 }
+            }
+        }
+        item {
+            val pingMode by viewModel.pingMode.collectAsState()
+            SettingsCard("ПРОВЕРКА ПИНГА") {
+                OptionColumn(
+                    options = listOf(
+                        Triple(PingMode.PROXY_GET, "Через прокси (GET)", "Реальное подключение через сервер + HTTP GET. Самый точный, медленнее"),
+                        Triple(PingMode.PROXY_HEAD, "Через прокси (HEAD)", "Реальное подключение через сервер + HTTP HEAD. Точный, чуть легче GET"),
+                        Triple(PingMode.TCP, "TCP", "Прямое TCP-соединение до сервера. Быстрый, но REALITY-серверы могут не отвечать"),
+                        Triple(PingMode.ICMP, "ICMP", "Обычный ping до адреса сервера. Быстрый, вне туннеля"),
+                    ),
+                    selected = pingMode,
+                    onSelect = viewModel::setPingMode,
+                )
             }
         }
         item {
@@ -358,6 +375,33 @@ private fun SwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean
     ) {
         Text(label, modifier = Modifier.fillMaxWidth(0.8f))
         Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** Vertical radio-style list for settings with too many (or too wordy) options for a SegmentedRow. */
+@Composable
+private fun <T> OptionColumn(options: List<Triple<T, String, String>>, selected: T, onSelect: (T) -> Unit) {
+    Column {
+        options.forEach { (value, title, subtitle) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { onSelect(value) }
+                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = value == selected, onClick = { onSelect(value) })
+                Column(modifier = Modifier.padding(start = 8.dp)) {
+                    Text(title, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            }
+        }
     }
 }
 

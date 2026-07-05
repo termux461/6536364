@@ -36,9 +36,9 @@ jobs:
       - name: Download geoip.dat / geosite.dat (routing rule data)
         # Needed for "geosite:"/"geoip:" entries in ConfigBuilder's routing rules (ad-block,
         # RU-domain/geoip direct routing) to resolve at all - same files v2rayNG and most other
-        # Xray-core clients ship. AndroidLibXrayLite's InitCoreEnv() (called once in LcVpnApp)
-        # installs a file reader that falls back to reading these straight out of the APK's
-        # assets by filename, so no extra copy-to-storage step is needed at runtime.
+        # Xray-core clients ship. Bundled as APK assets; GeoAssets.extractTo() copies them to
+        # real on-disk storage at app startup before Libv2ray.initCoreEnv() runs, since
+        # Xray-core opens them as plain files and can't read straight out of the APK.
         uses: robinraju/release-downloader@v1
         with:
           repository: "Loyalsoldier/v2ray-rules-dat"

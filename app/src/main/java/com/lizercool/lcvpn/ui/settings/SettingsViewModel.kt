@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lizercool.lcvpn.data.db.AppDatabase
 import com.lizercool.lcvpn.data.db.entity.AppRoutingRuleEntity
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.PingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.util.LanAddress
@@ -35,6 +36,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val tunnelMode: StateFlow<TunnelMode> = prefs.tunnelMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TunnelMode.TUN)
     val appRoutingMode: StateFlow<AppRoutingMode> = prefs.appRoutingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppRoutingMode.ALL_EXCEPT_SELECTED)
     val killSwitch: StateFlow<Boolean> = prefs.killSwitch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val pingMode: StateFlow<PingMode> = prefs.pingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PingMode.PROXY_GET)
 
     // Enumerating installed apps + loading each one's label is a real PackageManager cost (can
     // take a noticeable moment with 100+ apps installed) - loading it eagerly/synchronously on
@@ -71,6 +73,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setTunnelMode(value: TunnelMode) = viewModelScope.launch { prefs.setTunnelMode(value) }
     fun setAppRoutingMode(value: AppRoutingMode) = viewModelScope.launch { prefs.setAppRoutingMode(value) }
     fun setKillSwitch(value: Boolean) = viewModelScope.launch { prefs.setKillSwitch(value) }
+    fun setPingMode(value: PingMode) = viewModelScope.launch { prefs.setPingMode(value) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {
         viewModelScope.launch {

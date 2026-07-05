@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.PingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +29,7 @@ class Prefs(private val context: Context) {
         val ANNOUNCEMENT_SEEN_VERSION = stringPreferencesKey("announcement_seen_version")
         val LAN_PROXY_PASSWORD = stringPreferencesKey("lan_proxy_password")
         val KILL_SWITCH = booleanPreferencesKey("kill_switch")
+        val PING_MODE = stringPreferencesKey("ping_mode")
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -48,6 +50,9 @@ class Prefs(private val context: Context) {
             .getOrDefault(AppRoutingMode.ALL_EXCEPT_SELECTED)
     }
     val killSwitch: Flow<Boolean> = context.dataStore.data.map { it[Keys.KILL_SWITCH] ?: false }
+    val pingMode: Flow<PingMode> = context.dataStore.data.map {
+        runCatching { PingMode.valueOf(it[Keys.PING_MODE] ?: "") }.getOrDefault(PingMode.PROXY_GET)
+    }
 
     suspend fun setLanguage(value: String) = context.dataStore.edit { it[Keys.LANGUAGE] = value }
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[Keys.DARK_THEME] = value }
@@ -58,6 +63,7 @@ class Prefs(private val context: Context) {
     suspend fun setAppRoutingMode(value: AppRoutingMode) =
         context.dataStore.edit { it[Keys.APP_ROUTING_MODE] = value.name }
     suspend fun setKillSwitch(value: Boolean) = context.dataStore.edit { it[Keys.KILL_SWITCH] = value }
+    suspend fun setPingMode(value: PingMode) = context.dataStore.edit { it[Keys.PING_MODE] = value.name }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
         val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()

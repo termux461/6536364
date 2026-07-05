@@ -3,6 +3,7 @@ package com.lizercool.lcvpn.vpn
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.data.model.ProxyProtocol
 import com.lizercool.lcvpn.data.model.TunnelMode
+import com.lizercool.lcvpn.util.GeoAssets
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -36,30 +37,35 @@ object ConfigBuilder {
      * panel itself ships in its own exported configs.
      */
     private fun buildRouting(): JSONObject {
+        // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
+        // their .dat files, so those rules are only emitted when GeoAssets confirmed the files
+        // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
+        val geo = GeoAssets.available
+
         val rules = JSONArray()
-        rules.put(
-            JSONObject()
-                .put("domain", JSONArray().put("geosite:category-ads-all"))
-                .put("outboundTag", "block"),
-        )
-        rules.put(
-            JSONObject()
-                .put(
-                    "domain",
-                    JSONArray()
-                        .put("geosite:private")
-                        .put("geosite:category-ru")
-                        .put("regexp:.*\\.ru$")
-                        .put("regexp:.*\\.su$")
-                        .put("regexp:.*\\.рф$"),
-                )
-                .put("outboundTag", "direct"),
-        )
-        rules.put(
-            JSONObject()
-                .put("ip", JSONArray().put("geoip:ru").put("geoip:private"))
-                .put("outboundTag", "direct"),
-        )
+        if (geo) {
+            rules.put(
+                JSONObject()
+                    .put("domain", JSONArray().put("geosite:category-ads-all"))
+                    .put("outboundTag", "block"),
+            )
+        }
+        val directDomains = JSONArray()
+        if (geo) {
+            directDomains.put("geosite:private")
+            directDomains.put("geosite:category-ru")
+        }
+        directDomains.put("regexp:.*\\.ru$")
+        directDomains.put("regexp:.*\\.su$")
+        directDomains.put("regexp:.*\\.рф$")
+        rules.put(JSONObject().put("domain", directDomains).put("outboundTag", "direct"))
+        if (geo) {
+            rules.put(
+                JSONObject()
+                    .put("ip", JSONArray().put("geoip:ru").put("geoip:private"))
+                    .put("outboundTag", "direct"),
+            )
+        }
         rules.put(JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"))
 
         return JSONObject()
