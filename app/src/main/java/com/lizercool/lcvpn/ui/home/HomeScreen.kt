@@ -1,5 +1,11 @@
 package com.lizercool.lcvpn.ui.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,8 +24,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PowerSettingsNew
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,13 +42,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.R
+import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.util.Formatting
 import com.lizercool.lcvpn.vpn.ConnectionState
 import com.lizercool.lcvpn.vpn.ProxyStats
@@ -59,26 +72,38 @@ fun HomeScreen(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(24.dp))
+        BrandHeader()
 
+        Spacer(Modifier.height(28.dp))
+
+        val statusColor = when (state) {
+            is ConnectionState.Connected -> AccentGreenLocal
+            ConnectionState.Connecting -> MaterialTheme.colorScheme.primary
+            is ConnectionState.Error -> AccentRedLocal
+            ConnectionState.Disconnected -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+        }
         val statusText = when (state) {
             is ConnectionState.Connected -> stringResource(R.string.status_protected)
             ConnectionState.Connecting -> "ПОДКЛЮЧЕНИЕ..."
             is ConnectionState.Error -> "ОШИБКА"
             ConnectionState.Disconnected -> stringResource(R.string.status_unprotected)
         }
-        Text(statusText, style = MaterialTheme.typography.labelLarge, letterSpacing = 3.sp)
+        Text(statusText, style = MaterialTheme.typography.labelLarge, letterSpacing = 3.sp, color = statusColor, fontWeight = FontWeight.Bold)
         Text(
-            if (state is ConnectionState.Connected) stringResource(R.string.tap_to_disconnect) else stringResource(R.string.tap_to_connect),
+            when (state) {
+                is ConnectionState.Connected -> stringResource(R.string.tap_to_disconnect)
+                is ConnectionState.Error -> state.message
+                else -> stringResource(R.string.tap_to_connect)
+            },
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center,
         )
 
         Spacer(Modifier.height(32.dp))
 
         ConnectCircle(
-            connected = state is ConnectionState.Connected,
-            connecting = state == ConnectionState.Connecting,
+            state = state,
             onClick = {
                 if (state is ConnectionState.Connected) onDisconnect() else onRequestConnect()
             },
@@ -90,55 +115,117 @@ fun HomeScreen(
             ElapsedTimer(sinceEpochMs = state.sinceEpochMs)
             Spacer(Modifier.height(24.dp))
             SpeedRow(uiState.stats)
+            Spacer(Modifier.height(24.dp))
         }
 
-        Spacer(Modifier.height(24.dp))
+        ServerCard(
+            connectionState = state,
+            server = uiState.selectedServer,
+            autoSelect = uiState.autoSelectServer,
+        )
+    }
+}
 
-        val server = uiState.selectedServer
-        Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
+@Composable
+private fun BrandHeader() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(AccentGreenLocal.copy(alpha = 0.15f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = AccentGreenLocal, modifier = Modifier.size(16.dp))
+        }
+        Spacer(modifier = Modifier.padding(start = 8.dp))
+        Text(
+            stringResource(R.string.app_name).uppercase(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp,
+        )
+    }
+}
+
+@Composable
+private fun ServerCard(connectionState: ConnectionState, server: ServerEntity?, autoSelect: Boolean) {
+    val title = when {
+        autoSelect -> "Автовыбор · самый быстрый"
+        connectionState is ConnectionState.Connected -> connectionState.serverName
+        else -> server?.let { "${it.countryFlagEmoji} ${it.name}".trim() } ?: "Сервер не выбран"
+    }
+    val subtitle = when {
+        autoSelect -> "Xray-core сам выбирает лучший сервер подписки"
+        server == null -> "Выберите сервер во вкладке «Серверы»"
+        else -> server.protocol.label
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (autoSelect) {
+                    Icon(Icons.Filled.Bolt, contentDescription = null, tint = AccentGreenLocal, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.padding(start = 8.dp))
+                }
                 Column {
-                    Text("Авто · быстрейший", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        server?.let { "${it.countryFlagEmoji} ${it.name}" } ?: "Сервер не выбран",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                 }
-                server?.lastPingMs?.let {
-                    Text("${it}ms", color = AccentGreenLocal)
-                }
+            }
+            if (!autoSelect) {
+                server?.lastPingMs?.let { Text("${it}ms", color = AccentGreenLocal, fontWeight = FontWeight.Bold) }
             }
         }
     }
 }
 
 @Composable
-private fun ConnectCircle(connected: Boolean, connecting: Boolean, onClick: () -> Unit) {
+private fun ConnectCircle(state: ConnectionState, onClick: () -> Unit) {
+    val connected = state is ConnectionState.Connected
+    val connecting = state == ConnectionState.Connecting
+    val error = state is ConnectionState.Error
     val ringColor = when {
         connected -> AccentGreenLocal
         connecting -> MaterialTheme.colorScheme.primary
+        error -> AccentRedLocal
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
     }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "connect-pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        label = "pulse-alpha",
+    )
+
     Box(
         modifier = Modifier
             .size(220.dp)
-            .border(2.dp, ringColor, CircleShape)
+            .border(2.dp, ringColor.copy(alpha = if (connecting) pulseAlpha else 1f), CircleShape)
             .padding(16.dp)
             .background(ringColor.copy(alpha = 0.08f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = Icons.Filled.PowerSettingsNew,
-            contentDescription = null,
-            tint = ringColor,
-            modifier = Modifier.size(64.dp),
-        )
+        AnimatedContent(targetState = error, label = "connect-icon") { isError ->
+            Icon(
+                imageVector = if (isError) Icons.Filled.ErrorOutline else Icons.Filled.PowerSettingsNew,
+                contentDescription = null,
+                tint = ringColor,
+                modifier = Modifier
+                    .size(64.dp)
+                    .alpha(if (connecting) pulseAlpha else 1f),
+            )
+        }
     }
 }
 
@@ -179,7 +266,11 @@ private fun SpeedRow(stats: ProxyStats) {
 
 @Composable
 private fun SpeedTile(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, speedText: String, label: String) {
-    Card(modifier = modifier, shape = RoundedCornerShape(14.dp)) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+    ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = AccentGreenLocal, modifier = Modifier.size(20.dp))
             Column(modifier = Modifier.padding(start = 8.dp)) {
@@ -191,3 +282,4 @@ private fun SpeedTile(modifier: Modifier, icon: androidx.compose.ui.graphics.vec
 }
 
 private val AccentGreenLocal = Color(0xFF22C55E)
+private val AccentRedLocal = Color(0xFFEF4444)
