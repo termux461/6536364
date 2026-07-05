@@ -12,3 +12,5 @@ local.properties
 /app/release
 /app/libs/libv2ray.aar
 /app/src/main/jniLibs
+/app/src/main/assets/geoip.dat
+/app/src/main/assets/geosite.dat

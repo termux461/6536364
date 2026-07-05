@@ -33,6 +33,27 @@ jobs:
           fileName: "libv2ray.aar"
           out-file-path: "app/libs"
 
+      - name: Download geoip.dat / geosite.dat (routing rule data)
+        # Needed for "geosite:"/"geoip:" entries in ConfigBuilder's routing rules (ad-block,
+        # RU-domain/geoip direct routing) to resolve at all - same files v2rayNG and most other
+        # Xray-core clients ship. AndroidLibXrayLite's InitCoreEnv() (called once in LcVpnApp)
+        # installs a file reader that falls back to reading these straight out of the APK's
+        # assets by filename, so no extra copy-to-storage step is needed at runtime.
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "Loyalsoldier/v2ray-rules-dat"
+          latest: true
+          fileName: "geoip.dat"
+          out-file-path: "app/src/main/assets"
+
+      - name: Download geosite.dat
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "Loyalsoldier/v2ray-rules-dat"
+          latest: true
+          fileName: "geosite.dat"
+          out-file-path: "app/src/main/assets"
+
       - name: Install Android NDK
         run: |
           sdkmanager --install "ndk;26.1.10909125"
