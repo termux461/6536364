@@ -30,14 +30,52 @@ object ConfigBuilder {
         // fail for reasons unrelated to whether the server itself is reachable. When true, routing
         // collapses to a single "everything through the proxy" rule with no geo dependency at all.
         minimalRouting: Boolean = false,
-    ): String = buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
-        val outbounds = JSONArray()
-        outbounds.put(buildOutbound(server, "proxy"))
-        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
-        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
-        root.put("outbounds", outbounds)
+    ): String {
+        // Panel-authored full configs (Автовыбор profiles) carry their own routing/balancers -
+        // geoRouting/minimalRouting don't apply, the config is used as authored.
+        server.fullConfigJson?.let {
+            return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword)
+        }
+        return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
+            val outbounds = JSONArray()
+            outbounds.put(buildOutbound(server, "proxy"))
+            outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
+            outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+            root.put("outbounds", outbounds)
 
-        root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting))
+            root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting))
+        }
+    }
+
+    /**
+     * Adapts a complete panel-authored client config (an Автовыбор profile with a leastLoad
+     * balancer + burstObservatory, or any other xray-json subscription entry) for use here:
+     * its outbounds/routing/balancers/observatory are kept exactly as authored - that IS the
+     * auto-select logic - while the inbounds are replaced with ours (the panel's assume fixed
+     * ports 10808/10809; we bind a dynamic loopback port and optionally the LAN proxy).
+     */
+    private fun buildFromFullConfig(
+        configJson: String,
+        tunnelMode: TunnelMode,
+        socksPort: Int,
+        lanProxyPort: Int,
+        lanProxyPassword: String?,
+    ): String {
+        val root = JSONObject(configJson)
+        // The panel template's log block may point at file paths that don't exist on Android.
+        root.put("log", JSONObject().put("loglevel", "warning"))
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword))
+
+        // Traffic counters for the speed/usage UI (harmless if the config already has them).
+        if (!root.has("stats")) root.put("stats", JSONObject())
+        val policy = root.optJSONObject("policy") ?: JSONObject()
+        val system = policy.optJSONObject("system") ?: JSONObject()
+        system.put("statsOutboundUplink", true)
+        system.put("statsOutboundDownlink", true)
+        policy.put("system", system)
+        root.put("policy", policy)
+
+        return root.toString()
     }
 
     /**
@@ -110,6 +148,38 @@ object ConfigBuilder {
                 .put("queryStrategy", "UseIP"),
         )
 
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword))
+
+        putOutboundsAndRouting(root)
+
+        // Needed for CoreController.queryAllOutboundTrafficStats() to return real numbers.
+        root.put("stats", JSONObject())
+        root.put(
+            "policy",
+            JSONObject().put(
+                "system",
+                JSONObject()
+                    .put("statsOutboundUplink", true)
+                    .put("statsOutboundDownlink", true),
+            ),
+        )
+
+        return root.toString()
+    }
+
+    private fun buildInbounds(
+        tunnelMode: TunnelMode,
+        socksPort: Int,
+        lanProxyPort: Int,
+        lanProxyPassword: String?,
+    ): JSONArray {
+        // Sniffing recovers the destination domain from TLS/HTTP/QUIC handshakes - without it a
+        // SOCKS inbound only ever sees bare IPs, so every domain-based routing rule (geosite
+        // ad-block, RU bypass, the balancer selectors in Автовыбор configs) silently misses.
+        val sniffing = JSONObject()
+            .put("enabled", true)
+            .put("destOverride", JSONArray().put("http").put("tls").put("quic"))
+
         val inbounds = JSONArray()
         inbounds.put(
             JSONObject()
@@ -117,7 +187,8 @@ object ConfigBuilder {
                 .put("port", socksPort)
                 .put("listen", "127.0.0.1")
                 .put("protocol", "socks")
-                .put("settings", JSONObject().put("udp", true)),
+                .put("settings", JSONObject().put("udp", true))
+                .put("sniffing", sniffing),
         )
         if (tunnelMode == TunnelMode.TUN_AND_PROXY && lanProxyPort > 0 && !lanProxyPassword.isNullOrEmpty()) {
             inbounds.put(
@@ -137,26 +208,11 @@ object ConfigBuilder {
                                     JSONObject().put("user", "lcvpn").put("pass", lanProxyPassword),
                                 ),
                             ),
-                    ),
+                    )
+                    .put("sniffing", sniffing),
             )
         }
-        root.put("inbounds", inbounds)
-
-        putOutboundsAndRouting(root)
-
-        // Needed for CoreController.queryAllOutboundTrafficStats() to return real numbers.
-        root.put("stats", JSONObject())
-        root.put(
-            "policy",
-            JSONObject().put(
-                "system",
-                JSONObject()
-                    .put("statsOutboundUplink", true)
-                    .put("statsOutboundDownlink", true),
-            ),
-        )
-
-        return root.toString()
+        return inbounds
     }
 
     private fun buildOutbound(server: ServerEntity, tag: String): JSONObject {

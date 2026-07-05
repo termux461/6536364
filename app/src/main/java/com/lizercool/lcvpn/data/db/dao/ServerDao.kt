@@ -50,6 +50,9 @@ interface ServerDao {
     @Query("UPDATE servers SET isSelected = 1 WHERE subscriptionId = :subscriptionId AND address = :address AND port = :port")
     suspend fun selectByAddressPort(subscriptionId: Long, address: String, port: Int)
 
+    @Query("UPDATE servers SET isSelected = 1 WHERE id = (SELECT id FROM servers WHERE subscriptionId = :subscriptionId AND name = :name LIMIT 1)")
+    suspend fun selectByName(subscriptionId: Long, name: String): Int
+
     @Query("UPDATE servers SET lastPingMs = :pingMs WHERE id = :serverId")
     suspend fun updatePing(serverId: Long, pingMs: Int?)
 }
