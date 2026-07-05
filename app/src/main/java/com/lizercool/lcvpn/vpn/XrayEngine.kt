@@ -42,6 +42,14 @@ class XrayEngine : ProxyEngine {
             if (result.isSuccess) return@withContext true
 
             val error = result.exceptionOrNull()
+            if (isConfigError(error)) {
+                // A malformed/unresolvable config (e.g. geosite/geoip rules whose .dat files
+                // aren't available) will fail identically on every retry, so don't waste four
+                // attempts and several seconds on it - fail fast and let the caller fall back to
+                // a simpler config instead.
+                Timber.w(error, "Xray-core rejected the config; not retrying")
+                return@withContext false
+            }
             if (attempt == START_ATTEMPTS) {
                 Timber.e(error, "Failed to start Xray-core after %d attempts", START_ATTEMPTS)
             } else {
@@ -53,6 +61,15 @@ class XrayEngine : ProxyEngine {
             }
         }
         false
+    }
+
+    // A config-parse/validation failure from Xray-core (as opposed to a transient port bind
+    // clash) is deterministic - retrying the exact same config can't fix it.
+    private fun isConfigError(error: Throwable?): Boolean {
+        val message = error?.message ?: return false
+        return message.contains("config error", ignoreCase = true) ||
+            message.contains("failed to parse", ignoreCase = true) ||
+            message.contains("invalid field", ignoreCase = true)
     }
 
     private fun startOnce(configJson: String, tunFd: Int?) {

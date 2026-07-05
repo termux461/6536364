@@ -20,6 +20,16 @@ object ConfigBuilder {
         socksPort: Int,
         lanProxyPort: Int = 0,
         lanProxyPassword: String? = null,
+        // Whether to emit "geosite:"/"geoip:" routing rules. Defaults to whatever GeoAssets found
+        // on disk, but the connect path can force it false to retry after the geo-enabled config
+        // failed to start the core (see LcVpnService), so a device with unusable geodata still
+        // connects with degraded (proxy-everything) routing instead of failing outright.
+        geoRouting: Boolean = GeoAssets.available,
+        // Ping/latency probes only need to reach the proxy - they don't care about ad-block or
+        // RU-split routing, and pulling in geodata just makes the core slower to start and able to
+        // fail for reasons unrelated to whether the server itself is reachable. When true, routing
+        // collapses to a single "everything through the proxy" rule with no geo dependency at all.
+        minimalRouting: Boolean = false,
     ): String = buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
         val outbounds = JSONArray()
         outbounds.put(buildOutbound(server, "proxy"))
@@ -27,7 +37,7 @@ object ConfigBuilder {
         outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         root.put("outbounds", outbounds)
 
-        root.put("routing", buildRouting())
+        root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting))
     }
 
     /**
@@ -36,16 +46,25 @@ object ConfigBuilder {
      * then send everything else through the proxy. Mirrors the routing template the Remnawave
      * panel itself ships in its own exported configs.
      */
-    private fun buildRouting(): JSONObject {
-        // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
-        // their .dat files, so those rules are only emitted when GeoAssets confirmed the files
-        // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
-        val geo = GeoAssets.available
+    private fun buildRouting(geo: Boolean, minimal: Boolean): JSONObject {
+        // Latency probes: route everything straight through the proxy, nothing else. No geo, no
+        // RU bypass - the whole point is to time a request that actually traverses the tunnel.
+        if (minimal) {
+            val rules = JSONArray().put(
+                JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"),
+            )
+            return JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
+        }
 
+        // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
+        // their .dat files, so those rules are only emitted when the caller confirmed the files
+        // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
+        // Every rule carries "type":"field" - Xray-core rejects routing rules without it.
         val rules = JSONArray()
         if (geo) {
             rules.put(
                 JSONObject()
+                    .put("type", "field")
                     .put("domain", JSONArray().put("geosite:category-ads-all"))
                     .put("outboundTag", "block"),
             )
@@ -58,10 +77,11 @@ object ConfigBuilder {
         directDomains.put("regexp:.*\\.ru$")
         directDomains.put("regexp:.*\\.su$")
         directDomains.put("regexp:.*\\.рф$")
-        rules.put(JSONObject().put("domain", directDomains).put("outboundTag", "direct"))
+        rules.put(JSONObject().put("type", "field").put("domain", directDomains).put("outboundTag", "direct"))
         if (geo) {
             rules.put(
                 JSONObject()
+                    .put("type", "field")
                     .put("ip", JSONArray().put("geoip:ru").put("geoip:private"))
                     .put("outboundTag", "direct"),
             )

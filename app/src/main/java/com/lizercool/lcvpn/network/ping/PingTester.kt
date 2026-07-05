@@ -71,7 +71,10 @@ object PingTester {
 
     private fun measureProxy(server: ServerEntity, useHead: Boolean): Int? {
         val port = runCatching { findFreeLoopbackPort() }.getOrNull() ?: return null
-        val configJson = ConfigBuilder.build(server, TunnelMode.PROXY, port)
+        // minimalRouting: probe traffic goes straight through the proxy with no geosite/geoip
+        // rules, so the measurement can't be broken by missing/unusable geodata and the core
+        // starts faster - a latency test just needs a working tunnel, not the full routing table.
+        val configJson = ConfigBuilder.build(server, TunnelMode.PROXY, port, minimalRouting = true)
 
         val callback = object : CoreCallbackHandler {
             override fun startup(): Long = 0

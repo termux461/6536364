@@ -14,6 +14,7 @@ import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
 import com.lizercool.lcvpn.util.Formatting
+import com.lizercool.lcvpn.util.GeoAssets
 import com.lizercool.lcvpn.util.Prefs
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -94,7 +95,10 @@ class LcVpnService : VpnService() {
                 val usesTun = tunnelMode == TunnelMode.TUN || tunnelMode == TunnelMode.TUN_AND_PROXY
                 usesTunForThisAttempt = usesTun
                 val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
-                val configJson = ConfigBuilder.build(server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
+                val geoRouting = GeoAssets.available
+                val configJson = ConfigBuilder.build(
+                    server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword, geoRouting = geoRouting,
+                )
 
                 var tunFd: Int? = null
                 if (usesTun) {
@@ -109,7 +113,19 @@ class LcVpnService : VpnService() {
                 // xray-core and hev-socks5-tunnel's C code) then fight over the same file
                 // descriptor, which is what was crashing the process a few seconds after every
                 // successful TUN connect with no catchable Kotlin exception.
-                val started = engine.start(configJson, null)
+                var started = engine.start(configJson, null)
+                if (!started && geoRouting) {
+                    // The geo-enabled config couldn't start the core (most often because the
+                    // geoip/geosite .dat files aren't resolvable on this device). Rather than fail
+                    // the whole connection - as happened in the field, where every retry re-used
+                    // the same broken config - rebuild without geo routing and try once more so
+                    // the user still gets a working (proxy-everything) tunnel.
+                    Timber.w("Connect with geo routing failed; retrying without geosite/geoip rules")
+                    val fallbackConfig = ConfigBuilder.build(
+                        server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword, geoRouting = false,
+                    )
+                    started = engine.start(fallbackConfig, null)
+                }
                 if (!started) error("Proxy engine failed to start")
 
                 if (usesTun && tunFd != null) {
