@@ -13,9 +13,6 @@ import org.json.JSONObject
  */
 object ConfigBuilder {
 
-    private const val AUTO_BALANCER_TAG = "Super_Balancer"
-    private const val PROBE_URL = "https://cp.cloudflare.com/generate_204"
-
     fun build(
         server: ServerEntity,
         tunnelMode: TunnelMode,
@@ -29,76 +26,16 @@ object ConfigBuilder {
         outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
         root.put("outbounds", outbounds)
 
-        root.put("routing", buildRouting(outboundTag = "proxy"))
-    }
-
-    /**
-     * Builds a config where every server gets its own outbound (tagged "proxy", "proxy-2",
-     * "proxy-3", ... - matching the reference Remnawave "Автовыбор" profile), and Xray-core's
-     * own BurstObservatory continuously pings all of them so the "Super_Balancer" balancer can
-     * route traffic through whichever currently has the lowest load - auto-selecting the best
-     * server instead of pinning to one manually picked one.
-     */
-    fun buildAuto(
-        servers: List<ServerEntity>,
-        tunnelMode: TunnelMode,
-        socksPort: Int,
-        lanProxyPort: Int = 0,
-        lanProxyPassword: String? = null,
-    ): String = buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
-        val outbounds = JSONArray()
-        servers.forEachIndexed { index, server ->
-            val tag = if (index == 0) "proxy" else "proxy-${index + 1}"
-            outbounds.put(buildOutbound(server, tag))
-        }
-        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
-        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
-        root.put("outbounds", outbounds)
-
-        root.put(
-            "burstObservatory",
-            JSONObject()
-                .put("subjectSelector", JSONArray().put("proxy"))
-                .put(
-                    "pingConfig",
-                    JSONObject()
-                        .put("destination", PROBE_URL)
-                        .put("connectivity", "")
-                        .put("interval", "1m")
-                        .put("sampling", 1)
-                        .put("timeout", "3s"),
-                ),
-        )
-
-        val balancers = JSONArray().put(
-            JSONObject()
-                .put("tag", AUTO_BALANCER_TAG)
-                .put("selector", JSONArray().put("proxy"))
-                .put(
-                    "strategy",
-                    JSONObject()
-                        .put("type", "leastLoad")
-                        .put(
-                            "settings",
-                            JSONObject()
-                                .put("expected", 2)
-                                .put("maxRTT", "1s")
-                                .put("tolerance", 0.01)
-                                .put("baselines", JSONArray().put("500ms")),
-                        ),
-                )
-                .put("fallbackTag", "direct"),
-        )
-        root.put("routing", buildRouting(balancerTag = AUTO_BALANCER_TAG).put("balancers", balancers))
+        root.put("routing", buildRouting())
     }
 
     /**
      * Common routing shape: block ads/torrent trackers, keep Russian services and anything
      * geolocated inside Russia going direct (no point tunnelling traffic that isn't blocked),
-     * then send everything else through the given outbound or balancer. Mirrors the routing
-     * template the Remnawave panel itself ships in its own exported configs.
+     * then send everything else through the proxy. Mirrors the routing template the Remnawave
+     * panel itself ships in its own exported configs.
      */
-    private fun buildRouting(outboundTag: String? = null, balancerTag: String? = null): JSONObject {
+    private fun buildRouting(): JSONObject {
         val rules = JSONArray()
         rules.put(
             JSONObject()
@@ -123,10 +60,7 @@ object ConfigBuilder {
                 .put("ip", JSONArray().put("geoip:ru").put("geoip:private"))
                 .put("outboundTag", "direct"),
         )
-        val finalRule = JSONObject().put("type", "field").put("network", "tcp,udp")
-        outboundTag?.let { finalRule.put("outboundTag", it) }
-        balancerTag?.let { finalRule.put("balancerTag", it) }
-        rules.put(finalRule)
+        rules.put(JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"))
 
         return JSONObject()
             .put("domainStrategy", "IPIfNonMatch")

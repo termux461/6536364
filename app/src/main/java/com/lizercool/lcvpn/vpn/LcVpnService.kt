@@ -80,16 +80,8 @@ class LcVpnService : VpnService() {
                 val db = AppDatabase.get(this@LcVpnService)
                 val prefs = Prefs(this@LcVpnService)
                 killSwitchEnabled = prefs.killSwitch.first()
-                val autoSelect = prefs.autoSelectServer.first()
 
-                val servers = if (autoSelect) {
-                    db.serverDao().observeAll().first().also { if (it.isEmpty()) error("No servers available") }
-                } else {
-                    listOf(db.serverDao().observeSelected().first() ?: error("No server selected"))
-                }
-                // With auto-select there's no single "the" server - BurstObservatory (see
-                // ConfigBuilder.buildAuto) picks and switches between all of them on its own.
-                val displayName = if (autoSelect) "Автовыбор" else servers.first().name
+                val server = db.serverDao().observeSelected().first() ?: error("No server selected")
 
                 val tunnelMode = prefs.tunnelMode.first()
                 // Not hardcoded to the conventional 10808: that's the default local SOCKS port
@@ -102,11 +94,7 @@ class LcVpnService : VpnService() {
                 val usesTun = tunnelMode == TunnelMode.TUN || tunnelMode == TunnelMode.TUN_AND_PROXY
                 usesTunForThisAttempt = usesTun
                 val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
-                val configJson = if (autoSelect) {
-                    ConfigBuilder.buildAuto(servers, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
-                } else {
-                    ConfigBuilder.build(servers.first(), tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
-                }
+                val configJson = ConfigBuilder.build(server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
 
                 var tunFd: Int? = null
                 if (usesTun) {
@@ -134,10 +122,10 @@ class LcVpnService : VpnService() {
                 }
 
                 val connectedAt = System.currentTimeMillis()
-                startForeground(NOTIFICATION_ID, buildNotification(displayName, connectedAt, engine.stats.value))
-                state.value = ConnectionState.Connected(connectedAt, displayName)
-                startNotificationTicker(displayName, connectedAt)
-                Timber.i("VPN connected to %s (%s mode, autoSelect=%s)", displayName, tunnelMode, autoSelect)
+                startForeground(NOTIFICATION_ID, buildNotification(server.name, connectedAt, engine.stats.value))
+                state.value = ConnectionState.Connected(connectedAt, server.name)
+                startNotificationTicker(server.name, connectedAt)
+                Timber.i("VPN connected to %s (%s mode)", server.name, tunnelMode)
             }.onFailure { e ->
                 Timber.e(e, "Failed to connect")
                 val message = describeConnectError(e)

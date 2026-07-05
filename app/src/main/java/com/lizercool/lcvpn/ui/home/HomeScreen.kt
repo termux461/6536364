@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Shield
@@ -121,7 +120,6 @@ fun HomeScreen(
         ServerCard(
             connectionState = state,
             server = uiState.selectedServer,
-            autoSelect = uiState.autoSelectServer,
         )
     }
 }
@@ -148,17 +146,12 @@ private fun BrandHeader() {
 }
 
 @Composable
-private fun ServerCard(connectionState: ConnectionState, server: ServerEntity?, autoSelect: Boolean) {
+private fun ServerCard(connectionState: ConnectionState, server: ServerEntity?) {
     val title = when {
-        autoSelect -> "Автовыбор · самый быстрый"
         connectionState is ConnectionState.Connected -> connectionState.serverName
         else -> server?.let { "${it.countryFlagEmoji} ${it.name}".trim() } ?: "Сервер не выбран"
     }
-    val subtitle = when {
-        autoSelect -> "Xray-core сам выбирает лучший сервер подписки"
-        server == null -> "Выберите сервер во вкладке «Серверы»"
-        else -> server.protocol.label
-    }
+    val subtitle = server?.protocol?.label ?: "Выберите сервер во вкладке «Серверы»"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -170,19 +163,11 @@ private fun ServerCard(connectionState: ConnectionState, server: ServerEntity?, 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (autoSelect) {
-                    Icon(Icons.Filled.Bolt, contentDescription = null, tint = AccentGreenLocal, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.padding(start = 8.dp))
-                }
-                Column {
-                    Text(title, style = MaterialTheme.typography.titleMedium)
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             }
-            if (!autoSelect) {
-                server?.lastPingMs?.let { Text("${it}ms", color = AccentGreenLocal, fontWeight = FontWeight.Bold) }
-            }
+            server?.lastPingMs?.let { Text("${it}ms", color = AccentGreenLocal, fontWeight = FontWeight.Bold) }
         }
     }
 }

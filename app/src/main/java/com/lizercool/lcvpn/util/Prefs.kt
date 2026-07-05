@@ -27,7 +27,6 @@ class Prefs(private val context: Context) {
         val APP_ROUTING_MODE = stringPreferencesKey("app_routing_mode")
         val ANNOUNCEMENT_SEEN_VERSION = stringPreferencesKey("announcement_seen_version")
         val LAN_PROXY_PASSWORD = stringPreferencesKey("lan_proxy_password")
-        val AUTO_SELECT_SERVER = booleanPreferencesKey("auto_select_server")
         val KILL_SWITCH = booleanPreferencesKey("kill_switch")
     }
 
@@ -48,7 +47,6 @@ class Prefs(private val context: Context) {
         runCatching { AppRoutingMode.valueOf(it[Keys.APP_ROUTING_MODE] ?: "") }
             .getOrDefault(AppRoutingMode.ALL_EXCEPT_SELECTED)
     }
-    val autoSelectServer: Flow<Boolean> = context.dataStore.data.map { it[Keys.AUTO_SELECT_SERVER] ?: false }
     val killSwitch: Flow<Boolean> = context.dataStore.data.map { it[Keys.KILL_SWITCH] ?: false }
 
     suspend fun setLanguage(value: String) = context.dataStore.edit { it[Keys.LANGUAGE] = value }
@@ -59,7 +57,6 @@ class Prefs(private val context: Context) {
     suspend fun setTunnelMode(value: TunnelMode) = context.dataStore.edit { it[Keys.TUNNEL_MODE] = value.name }
     suspend fun setAppRoutingMode(value: AppRoutingMode) =
         context.dataStore.edit { it[Keys.APP_ROUTING_MODE] = value.name }
-    suspend fun setAutoSelectServer(value: Boolean) = context.dataStore.edit { it[Keys.AUTO_SELECT_SERVER] = value }
     suspend fun setKillSwitch(value: Boolean) = context.dataStore.edit { it[Keys.KILL_SWITCH] = value }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {

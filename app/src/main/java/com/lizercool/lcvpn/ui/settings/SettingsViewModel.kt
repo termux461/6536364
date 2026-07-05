@@ -14,6 +14,7 @@ import com.lizercool.lcvpn.util.Prefs
 import com.lizercool.lcvpn.vpn.AppRoutingManager
 import com.lizercool.lcvpn.vpn.InstalledAppInfo
 import com.lizercool.lcvpn.vpn.LcVpnService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -33,10 +34,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val updateOnLaunch: StateFlow<Boolean> = prefs.updateOnLaunch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val tunnelMode: StateFlow<TunnelMode> = prefs.tunnelMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TunnelMode.TUN)
     val appRoutingMode: StateFlow<AppRoutingMode> = prefs.appRoutingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppRoutingMode.ALL_EXCEPT_SELECTED)
-    val autoSelectServer: StateFlow<Boolean> = prefs.autoSelectServer.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val killSwitch: StateFlow<Boolean> = prefs.killSwitch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val installedApps: List<InstalledAppInfo> by lazy { AppRoutingManager.listInstalledApps(application) }
+    // Enumerating installed apps + loading each one's label is a real PackageManager cost (can
+    // take a noticeable moment with 100+ apps installed) - loading it eagerly/synchronously on
+    // the main thread the first time the Connection tab reads it is what was freezing the UI on
+    // entry. Loaded lazily in the background instead; starts empty and fills in once ready.
+    private val _installedApps = MutableStateFlow<List<InstalledAppInfo>>(emptyList())
+    val installedApps: StateFlow<List<InstalledAppInfo>> = _installedApps
+    private val _installedAppsLoading = MutableStateFlow(true)
+    val installedAppsLoading: StateFlow<Boolean> = _installedAppsLoading
 
     val selectedPackages: StateFlow<Set<String>> = db.appRoutingRuleDao().observeAll()
         .map { list -> list.map { it.packageName }.toSet() }
@@ -49,6 +56,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         viewModelScope.launch { _lanProxyPassword.value = prefs.lanProxyPassword() }
+        viewModelScope.launch(Dispatchers.Default) {
+            val apps = AppRoutingManager.listInstalledApps(getApplication())
+            _installedApps.value = apps
+            _installedAppsLoading.value = false
+        }
     }
 
     fun setLanguage(value: String) = viewModelScope.launch { prefs.setLanguage(value) }
@@ -58,7 +70,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setUpdateOnLaunch(value: Boolean) = viewModelScope.launch { prefs.setUpdateOnLaunch(value) }
     fun setTunnelMode(value: TunnelMode) = viewModelScope.launch { prefs.setTunnelMode(value) }
     fun setAppRoutingMode(value: AppRoutingMode) = viewModelScope.launch { prefs.setAppRoutingMode(value) }
-    fun setAutoSelectServer(value: Boolean) = viewModelScope.launch { prefs.setAutoSelectServer(value) }
     fun setKillSwitch(value: Boolean) = viewModelScope.launch { prefs.setKillSwitch(value) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {

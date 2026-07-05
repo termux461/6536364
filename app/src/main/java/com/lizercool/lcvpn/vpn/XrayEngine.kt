@@ -92,11 +92,10 @@ class XrayEngine : ProxyEngine {
             while (true) {
                 delay(1000)
                 runCatching {
-                    // Sums every outbound's counters instead of querying a single hardcoded
-                    // "proxy" tag, since auto-select mode (see ConfigBuilder.buildAuto) has one
-                    // outbound per server ("auto-0", "auto-1", ...) rather than just "proxy".
-                    // QueryAllOutboundTrafficStats resets each counter on read, so this already
-                    // returns the delta transferred since the previous call.
+                    // Sums every outbound's counters rather than querying a single hardcoded tag,
+                    // so this keeps working regardless of how many outbounds a config ends up
+                    // with. QueryAllOutboundTrafficStats resets each counter on read, so this
+                    // already returns the delta transferred since the previous call.
                     var uplinkDelta = 0L
                     var downlinkDelta = 0L
                     coreController.queryAllOutboundTrafficStats().split(';').forEach { entry ->
