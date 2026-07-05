@@ -10,7 +10,6 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.lizercool.lcvpn.R
 import com.lizercool.lcvpn.data.db.AppDatabase
-import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
@@ -47,6 +46,7 @@ class LcVpnService : VpnService() {
     private var parcelFileDescriptor: android.os.ParcelFileDescriptor? = null
     private val isStarting = AtomicBoolean(false)
     private var notificationTickerJob: Job? = null
+    private var killSwitchRetryJob: Job? = null
     private var tun2SocksRunning = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -63,6 +63,8 @@ class LcVpnService : VpnService() {
     private fun connect() {
         if (isStarting.getAndSet(true)) return
         state.value = ConnectionState.Connecting
+        killSwitchRetryJob?.cancel()
+        killSwitchRetryJob = null
 
         // Android kills the process with ForegroundServiceDidNotStartInTimeException if
         // startForeground() isn't called within a few seconds of Context.startForegroundService()
@@ -72,11 +74,22 @@ class LcVpnService : VpnService() {
         startForeground(NOTIFICATION_ID, buildConnectingNotification())
 
         scope.launch {
+            var usesTunForThisAttempt = false
+            var killSwitchEnabled = false
             runCatching {
                 val db = AppDatabase.get(this@LcVpnService)
                 val prefs = Prefs(this@LcVpnService)
-                val server = db.serverDao().observeSelected().first()
-                    ?: error("No server selected")
+                killSwitchEnabled = prefs.killSwitch.first()
+                val autoSelect = prefs.autoSelectServer.first()
+
+                val servers = if (autoSelect) {
+                    db.serverDao().observeAll().first().also { if (it.isEmpty()) error("No servers available") }
+                } else {
+                    listOf(db.serverDao().observeSelected().first() ?: error("No server selected"))
+                }
+                // With auto-select there's no single "the" server - BurstObservatory (see
+                // ConfigBuilder.buildAuto) picks and switches between all of them on its own.
+                val displayName = if (autoSelect) "Автовыбор" else servers.first().name
 
                 val tunnelMode = prefs.tunnelMode.first()
                 // Not hardcoded to the conventional 10808: that's the default local SOCKS port
@@ -87,8 +100,13 @@ class LcVpnService : VpnService() {
                 // that collision entirely.
                 val socksPort = findFreeLoopbackPort()
                 val usesTun = tunnelMode == TunnelMode.TUN || tunnelMode == TunnelMode.TUN_AND_PROXY
+                usesTunForThisAttempt = usesTun
                 val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
-                val configJson = ConfigBuilder.build(server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
+                val configJson = if (autoSelect) {
+                    ConfigBuilder.buildAuto(servers, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
+                } else {
+                    ConfigBuilder.build(servers.first(), tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword)
+                }
 
                 var tunFd: Int? = null
                 if (usesTun) {
@@ -116,17 +134,31 @@ class LcVpnService : VpnService() {
                 }
 
                 val connectedAt = System.currentTimeMillis()
-                startForeground(NOTIFICATION_ID, buildNotification(server.name, connectedAt, engine.stats.value))
-                state.value = ConnectionState.Connected(connectedAt, server.name)
-                startNotificationTicker(server.name, connectedAt)
-                Timber.i("VPN connected to %s (%s mode)", server.name, tunnelMode)
+                startForeground(NOTIFICATION_ID, buildNotification(displayName, connectedAt, engine.stats.value))
+                state.value = ConnectionState.Connected(connectedAt, displayName)
+                startNotificationTicker(displayName, connectedAt)
+                Timber.i("VPN connected to %s (%s mode, autoSelect=%s)", displayName, tunnelMode, autoSelect)
             }.onFailure { e ->
                 Timber.e(e, "Failed to connect")
                 val message = describeConnectError(e)
                 state.value = ConnectionState.Error(message)
-                showErrorNotification(message)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+
+                if (killSwitchEnabled && usesTunForThisAttempt && parcelFileDescriptor != null) {
+                    // Kill switch: the TUN interface is already routing all device traffic and
+                    // stays up - so instead of tearing it down (which would fall back to the
+                    // raw, unprotected network), leave it blocking everything and keep retrying
+                    // in the background until the proxy comes back.
+                    Timber.w("Kill switch active - keeping traffic blocked and retrying instead of disconnecting")
+                    startForeground(NOTIFICATION_ID, buildBlockedNotification(message))
+                    killSwitchRetryJob = scope.launch {
+                        delay(KILL_SWITCH_RETRY_DELAY_MS)
+                        connect()
+                    }
+                } else {
+                    showErrorNotification(message)
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                }
             }
             isStarting.set(false)
         }
@@ -147,7 +179,12 @@ class LcVpnService : VpnService() {
         applyAppRouting(builder, prefs)
 
         val pfd = builder.establish() ?: error("VpnService.Builder.establish() returned null (permission not granted?)")
+        // Close the previous fd only after the new one is up (relevant for kill-switch retries):
+        // establish() atomically replaces this app's active tun interface, so there's no gap
+        // where traffic could leak out unprotected between the old and new one.
+        val previous = parcelFileDescriptor
         parcelFileDescriptor = pfd
+        previous?.close()
         return pfd.fd
     }
 
@@ -181,6 +218,8 @@ class LcVpnService : VpnService() {
     }
 
     private fun disconnect() {
+        killSwitchRetryJob?.cancel()
+        killSwitchRetryJob = null
         notificationTickerJob?.cancel()
         notificationTickerJob = null
         stopTun2Socks()
@@ -203,6 +242,7 @@ class LcVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        killSwitchRetryJob?.cancel()
         notificationTickerJob?.cancel()
         stopTun2Socks()
         serviceJob.cancel()
@@ -245,6 +285,15 @@ class LcVpnService : VpnService() {
             .build()
     }
 
+    /** Shown while the kill switch is holding traffic blocked between reconnect attempts. */
+    private fun buildBlockedNotification(message: String): Notification {
+        ensureNotificationChannel()
+        return baseNotificationBuilder()
+            .setContentTitle("LC VPN: трафик заблокирован (Kill Switch)")
+            .setContentText("$message Переподключение...")
+            .build()
+    }
+
     private fun buildNotification(serverName: String, connectedAt: Long, stats: ProxyStats): Notification {
         ensureNotificationChannel()
         val elapsed = Formatting.elapsed(connectedAt)
@@ -281,6 +330,7 @@ class LcVpnService : VpnService() {
         private const val CHANNEL_ID = "lcvpn_status"
         private const val NOTIFICATION_ID = 1
         private const val ERROR_NOTIFICATION_ID = 2
+        private const val KILL_SWITCH_RETRY_DELAY_MS = 5000L
         private const val TUN_ADDRESS = "10.10.10.1"
         private const val TUN_MTU = 1500
         const val LAN_PROXY_PORT = 10809

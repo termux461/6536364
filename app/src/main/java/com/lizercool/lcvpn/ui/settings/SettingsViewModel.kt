@@ -33,6 +33,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val updateOnLaunch: StateFlow<Boolean> = prefs.updateOnLaunch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val tunnelMode: StateFlow<TunnelMode> = prefs.tunnelMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), TunnelMode.TUN)
     val appRoutingMode: StateFlow<AppRoutingMode> = prefs.appRoutingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AppRoutingMode.ALL_EXCEPT_SELECTED)
+    val autoSelectServer: StateFlow<Boolean> = prefs.autoSelectServer.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val killSwitch: StateFlow<Boolean> = prefs.killSwitch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val installedApps: List<InstalledAppInfo> by lazy { AppRoutingManager.listInstalledApps(application) }
 
@@ -56,6 +58,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setUpdateOnLaunch(value: Boolean) = viewModelScope.launch { prefs.setUpdateOnLaunch(value) }
     fun setTunnelMode(value: TunnelMode) = viewModelScope.launch { prefs.setTunnelMode(value) }
     fun setAppRoutingMode(value: AppRoutingMode) = viewModelScope.launch { prefs.setAppRoutingMode(value) }
+    fun setAutoSelectServer(value: Boolean) = viewModelScope.launch { prefs.setAutoSelectServer(value) }
+    fun setKillSwitch(value: Boolean) = viewModelScope.launch { prefs.setKillSwitch(value) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {
         viewModelScope.launch {

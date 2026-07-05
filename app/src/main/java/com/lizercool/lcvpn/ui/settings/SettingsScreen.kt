@@ -105,6 +105,8 @@ private fun ConnectionTab(viewModel: SettingsViewModel) {
     val appRoutingMode by viewModel.appRoutingMode.collectAsState()
     val selectedPackages by viewModel.selectedPackages.collectAsState()
     val lanProxyPassword by viewModel.lanProxyPassword.collectAsState()
+    val autoSelectServer by viewModel.autoSelectServer.collectAsState()
+    val killSwitch by viewModel.killSwitch.collectAsState()
     var query by remember { mutableStateOf("") }
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -128,6 +130,28 @@ private fun ConnectionTab(viewModel: SettingsViewModel) {
                         "Пароль: $lanProxyPassword",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+                )
+            }
+
+            SectionLabel("СЕРВЕРЫ")
+            SwitchRow("Автовыбор лучшего сервера", autoSelectServer, viewModel::setAutoSelectServer)
+            if (autoSelectServer) {
+                Text(
+                    "Xray-core сам постоянно проверяет пинг всех серверов подписки и держит " +
+                        "трафик на самом быстром из них (BurstObservatory), переключаясь " +
+                        "автоматически - выбор сервера вручную на экране «Серверы» при этом не используется.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                )
+            }
+            SwitchRow("Kill Switch", killSwitch, viewModel::setKillSwitch)
+            if (killSwitch) {
+                Text(
+                    "Если соединение с сервером обрывается в режиме TUN, трафик остаётся " +
+                        "заблокированным (не уходит напрямую в интернет), пока приложение само " +
+                        "не переподключится.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
                 )
             }
 

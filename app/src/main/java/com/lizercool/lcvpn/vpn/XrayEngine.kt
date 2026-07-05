@@ -92,10 +92,23 @@ class XrayEngine : ProxyEngine {
             while (true) {
                 delay(1000)
                 runCatching {
-                    // QueryStats resets the counter on read, so each call already returns
-                    // the delta transferred since the previous call.
-                    val uplinkDelta = coreController.queryStats("proxy", "uplink")
-                    val downlinkDelta = coreController.queryStats("proxy", "downlink")
+                    // Sums every outbound's counters instead of querying a single hardcoded
+                    // "proxy" tag, since auto-select mode (see ConfigBuilder.buildAuto) has one
+                    // outbound per server ("auto-0", "auto-1", ...) rather than just "proxy".
+                    // QueryAllOutboundTrafficStats resets each counter on read, so this already
+                    // returns the delta transferred since the previous call.
+                    var uplinkDelta = 0L
+                    var downlinkDelta = 0L
+                    coreController.queryAllOutboundTrafficStats().split(';').forEach { entry ->
+                        if (entry.isBlank()) return@forEach
+                        val parts = entry.split(',', limit = 3)
+                        if (parts.size != 3) return@forEach
+                        val value = parts[2].toLongOrNull() ?: return@forEach
+                        when (parts[1]) {
+                            "uplink" -> uplinkDelta += value
+                            "downlink" -> downlinkDelta += value
+                        }
+                    }
                     totalUplink += uplinkDelta
                     totalDownlink += downlinkDelta
                     _stats.value = ProxyStats(

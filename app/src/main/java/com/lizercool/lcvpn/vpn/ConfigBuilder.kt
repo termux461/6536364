@@ -13,12 +13,91 @@ import org.json.JSONObject
  */
 object ConfigBuilder {
 
+    /** Tag prefix shared by every per-server outbound in [buildAuto] - BurstObservatory and the
+     *  balancer both select on this prefix, so it must stay in sync between the two. */
+    private const val AUTO_TAG_PREFIX = "auto-"
+    private const val AUTO_BALANCER_TAG = "auto-balancer"
+    private const val PROBE_URL = "https://www.gstatic.com/generate_204"
+
     fun build(
         server: ServerEntity,
         tunnelMode: TunnelMode,
         socksPort: Int,
         lanProxyPort: Int = 0,
         lanProxyPassword: String? = null,
+    ): String = buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
+        val outbounds = JSONArray()
+        outbounds.put(buildOutbound(server, "proxy"))
+        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
+        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+        root.put("outbounds", outbounds)
+    }
+
+    /**
+     * Builds a config where every server gets its own outbound, and Xray-core's own
+     * BurstObservatory continuously pings all of them and routes traffic through whichever
+     * currently has the lowest latency - auto-selecting the best server instead of pinning to
+     * one manually picked one.
+     */
+    fun buildAuto(
+        servers: List<ServerEntity>,
+        tunnelMode: TunnelMode,
+        socksPort: Int,
+        lanProxyPort: Int = 0,
+        lanProxyPassword: String? = null,
+    ): String = buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
+        val outbounds = JSONArray()
+        servers.forEachIndexed { index, server ->
+            outbounds.put(buildOutbound(server, "$AUTO_TAG_PREFIX$index"))
+        }
+        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
+        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
+        root.put("outbounds", outbounds)
+
+        root.put(
+            "burstObservatory",
+            JSONObject()
+                .put("subjectSelector", JSONArray().put(AUTO_TAG_PREFIX))
+                .put(
+                    "pingConfig",
+                    JSONObject()
+                        .put("destination", PROBE_URL)
+                        .put("interval", "1m")
+                        .put("timeout", "10s")
+                        .put("sampling", 2),
+                ),
+        )
+        root.put(
+            "routing",
+            JSONObject()
+                .put("domainStrategy", "AsIs")
+                .put(
+                    "balancers",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("tag", AUTO_BALANCER_TAG)
+                            .put("selector", JSONArray().put(AUTO_TAG_PREFIX))
+                            .put("strategy", JSONObject().put("type", "leastPing")),
+                    ),
+                )
+                .put(
+                    "rules",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("type", "field")
+                            .put("network", "tcp,udp")
+                            .put("balancerTag", AUTO_BALANCER_TAG),
+                    ),
+                ),
+        )
+    }
+
+    private inline fun buildRoot(
+        tunnelMode: TunnelMode,
+        socksPort: Int,
+        lanProxyPort: Int,
+        lanProxyPassword: String?,
+        putOutbounds: (JSONObject) -> Unit,
     ): String {
         val root = JSONObject()
         root.put("log", JSONObject().put("loglevel", "warning"))
@@ -55,13 +134,9 @@ object ConfigBuilder {
         }
         root.put("inbounds", inbounds)
 
-        val outbounds = JSONArray()
-        outbounds.put(buildOutbound(server))
-        outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
-        outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
-        root.put("outbounds", outbounds)
+        putOutbounds(root)
 
-        // Needed for V2RayPoint.queryStats("proxy", "uplink"/"downlink") to return real numbers.
+        // Needed for CoreController.queryAllOutboundTrafficStats() to return real numbers.
         root.put("stats", JSONObject())
         root.put(
             "policy",
@@ -76,14 +151,14 @@ object ConfigBuilder {
         return root.toString()
     }
 
-    private fun buildOutbound(server: ServerEntity): JSONObject {
+    private fun buildOutbound(server: ServerEntity, tag: String): JSONObject {
         return when (server.protocol) {
-            ProxyProtocol.HYSTERIA2 -> buildHysteria2Outbound(server)
-            else -> buildVlessOutbound(server)
+            ProxyProtocol.HYSTERIA2 -> buildHysteria2Outbound(server, tag)
+            else -> buildVlessOutbound(server, tag)
         }
     }
 
-    private fun buildVlessOutbound(server: ServerEntity): JSONObject {
+    private fun buildVlessOutbound(server: ServerEntity, tag: String): JSONObject {
         val user = JSONObject()
             .put("id", server.uuid)
             .put("encryption", "none")
@@ -135,13 +210,13 @@ object ConfigBuilder {
         }
 
         return JSONObject()
-            .put("tag", "proxy")
+            .put("tag", tag)
             .put("protocol", "vless")
             .put("settings", settings)
             .put("streamSettings", streamSettings)
     }
 
-    private fun buildHysteria2Outbound(server: ServerEntity): JSONObject {
+    private fun buildHysteria2Outbound(server: ServerEntity, tag: String): JSONObject {
         // NOTE: mainline Xray-core does not natively speak Hysteria2 at the time this was
         // written. This shape mirrors sing-box's hysteria2 outbound and is here so the rest of
         // the pipeline (server list, selection, connect flow) works end-to-end; it will need to
@@ -157,7 +232,7 @@ object ConfigBuilder {
         }
 
         return JSONObject()
-            .put("tag", "proxy")
+            .put("tag", tag)
             .put("protocol", "hysteria2")
             .put("settings", settings)
     }
