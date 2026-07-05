@@ -32,9 +32,13 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     fun refreshPings() {
         viewModelScope.launch {
             _isPinging.value = true
-            val current = servers.value
-            val results = PingTester.pingAll(current)
-            results.forEach { (serverId, ms) -> db.serverDao().updatePing(serverId, ms) }
+            // Each ping now spins up a real temporary Xray-core instance and can take a few
+            // seconds, so servers are pinged one at a time and the result is written as soon as
+            // it's ready rather than waiting for the whole batch to finish.
+            servers.value.forEach { server ->
+                val ms = PingTester.pingMillis(server)
+                db.serverDao().updatePing(server.id, ms)
+            }
             _isPinging.value = false
         }
     }
