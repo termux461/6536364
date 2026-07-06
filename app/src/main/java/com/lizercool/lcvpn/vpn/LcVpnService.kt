@@ -50,6 +50,7 @@ class LcVpnService : VpnService() {
     private var notificationTickerJob: Job? = null
     private var killSwitchRetryJob: Job? = null
     private var tun2SocksRunning = false
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -97,8 +98,13 @@ class LcVpnService : VpnService() {
                 usesTunForThisAttempt = usesTun
                 val lanProxyPassword = if (tunnelMode == TunnelMode.TUN_AND_PROXY) prefs.lanProxyPassword() else null
                 val geoRouting = GeoAssets.available
+                val sniffing = prefs.sniffing.first()
+                val blockUdp = prefs.blockUdp.first()
+                val idleTimeoutSec = prefs.idleTimeoutSec.first()
+                if (prefs.keepAwake.first()) acquireWakeLock()
                 val configJson = ConfigBuilder.build(
-                    server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword, geoRouting = geoRouting,
+                    server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
+                    geoRouting = geoRouting, sniffing = sniffing, blockUdp = blockUdp,
                 )
 
                 var tun: TunResult? = null
@@ -123,7 +129,8 @@ class LcVpnService : VpnService() {
                     // the user still gets a working (proxy-everything) tunnel.
                     Timber.w("Connect with geo routing failed; retrying without geosite/geoip rules")
                     val fallbackConfig = ConfigBuilder.build(
-                        server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword, geoRouting = false,
+                        server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
+                        geoRouting = false, sniffing = sniffing, blockUdp = blockUdp,
                     )
                     started = engine.start(fallbackConfig, null)
                 }
@@ -131,7 +138,7 @@ class LcVpnService : VpnService() {
 
                 if (usesTun && tun != null) {
                     val v6 = if (tun.hasIpv6) TUN_ADDRESS_V6 else null
-                    HevSocks5Tunnel.start(this@LcVpnService, tun.fd, socksPort, TUN_MTU, TUN_ADDRESS, v6)
+                    HevSocks5Tunnel.start(this@LcVpnService, tun.fd, socksPort, TUN_MTU, TUN_ADDRESS, v6, idleTimeoutSec)
                     tun2SocksRunning = true
                     Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tun.fd, socksPort)
                 }
@@ -172,6 +179,23 @@ class LcVpnService : VpnService() {
 
     private fun findFreeLoopbackPort(): Int =
         java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+
+    /** Optional partial wakelock - keeps the tunnel alive under aggressive OEM dozing (Xiaomi/HyperOS). */
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        runCatching {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "lcvpn:tunnel").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { Timber.w(it, "Failed to acquire wakelock") }
+    }
+
+    private fun releaseWakeLock() {
+        runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
+        wakeLock = null
+    }
 
     private data class TunResult(val fd: Int, val hasIpv6: Boolean)
 
@@ -270,6 +294,7 @@ class LcVpnService : VpnService() {
         notificationTickerJob?.cancel()
         notificationTickerJob = null
         stopTun2Socks()
+        releaseWakeLock()
         scope.launch {
             engine.stop()
             parcelFileDescriptor?.close()
@@ -292,6 +317,7 @@ class LcVpnService : VpnService() {
         killSwitchRetryJob?.cancel()
         notificationTickerJob?.cancel()
         stopTun2Socks()
+        releaseWakeLock()
         serviceJob.cancel()
         parcelFileDescriptor?.close()
         super.onDestroy()

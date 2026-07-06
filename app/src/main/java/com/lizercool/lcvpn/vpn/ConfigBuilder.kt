@@ -30,20 +30,24 @@ object ConfigBuilder {
         // fail for reasons unrelated to whether the server itself is reachable. When true, routing
         // collapses to a single "everything through the proxy" rule with no geo dependency at all.
         minimalRouting: Boolean = false,
+        // Advanced tuning (Расширенные настройки).
+        sniffing: Boolean = true,
+        blockUdp: Boolean = false,
     ): String {
         // Panel-authored full configs (Автовыбор profiles) carry their own routing/balancers -
-        // geoRouting/minimalRouting don't apply, the config is used as authored.
+        // geoRouting/minimalRouting/blockUdp don't apply, the config is used as authored (only
+        // our inbounds + sniffing preference are swapped in).
         server.fullConfigJson?.let {
-            return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword)
+            return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing)
         }
-        return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword) { root ->
+        return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing) { root ->
             val outbounds = JSONArray()
             outbounds.put(buildOutbound(server, "proxy"))
             outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
             outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
             root.put("outbounds", outbounds)
 
-            root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting))
+            root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting, blockUdp = blockUdp))
         }
     }
 
@@ -60,11 +64,12 @@ object ConfigBuilder {
         socksPort: Int,
         lanProxyPort: Int,
         lanProxyPassword: String?,
+        sniffing: Boolean,
     ): String {
         val root = JSONObject(configJson)
         // The panel template's log block may point at file paths that don't exist on Android.
         root.put("log", JSONObject().put("loglevel", "warning"))
-        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword))
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing))
 
         // Traffic counters for the speed/usage UI (harmless if the config already has them).
         if (!root.has("stats")) root.put("stats", JSONObject())
@@ -84,7 +89,7 @@ object ConfigBuilder {
      * then send everything else through the proxy. Mirrors the routing template the Remnawave
      * panel itself ships in its own exported configs.
      */
-    private fun buildRouting(geo: Boolean, minimal: Boolean): JSONObject {
+    private fun buildRouting(geo: Boolean, minimal: Boolean, blockUdp: Boolean = false): JSONObject {
         // Latency probes: route everything straight through the proxy, nothing else. No geo, no
         // RU bypass - the whole point is to time a request that actually traverses the tunnel.
         if (minimal) {
@@ -99,6 +104,11 @@ object ConfigBuilder {
         // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
         // Every rule carries "type":"field" - Xray-core rejects routing rules without it.
         val rules = JSONArray()
+        // Optional: drop all UDP (breaks QUIC/DoU/games/voice - some users want it to force
+        // everything onto TCP-based tunnels). Placed first so it wins over the rules below.
+        if (blockUdp) {
+            rules.put(JSONObject().put("type", "field").put("network", "udp").put("outboundTag", "block"))
+        }
         if (geo) {
             rules.put(
                 JSONObject()
@@ -137,6 +147,7 @@ object ConfigBuilder {
         socksPort: Int,
         lanProxyPort: Int,
         lanProxyPassword: String?,
+        sniffing: Boolean,
         putOutboundsAndRouting: (JSONObject) -> Unit,
     ): String {
         val root = JSONObject()
@@ -148,7 +159,7 @@ object ConfigBuilder {
                 .put("queryStrategy", "UseIP"),
         )
 
-        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword))
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing))
 
         putOutboundsAndRouting(root)
 
@@ -172,12 +183,14 @@ object ConfigBuilder {
         socksPort: Int,
         lanProxyPort: Int,
         lanProxyPassword: String?,
+        sniffingEnabled: Boolean,
     ): JSONArray {
         // Sniffing recovers the destination domain from TLS/HTTP/QUIC handshakes - without it a
         // SOCKS inbound only ever sees bare IPs, so every domain-based routing rule (geosite
         // ad-block, RU bypass, the balancer selectors in Автовыбор configs) silently misses.
+        // Exposed as a setting because on rare networks it can interfere; default on.
         val sniffing = JSONObject()
-            .put("enabled", true)
+            .put("enabled", sniffingEnabled)
             .put("destOverride", JSONArray().put("http").put("tls").put("quic"))
 
         val inbounds = JSONArray()

@@ -13,14 +13,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -62,9 +66,14 @@ private val tabTitles = listOf("Общие", "Подключение", "Марш
 fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAppRouting by remember { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
 
     if (showAppRouting) {
         AppRoutingScreen(viewModel = viewModel, onBack = { showAppRouting = false })
+        return
+    }
+    if (showAdvanced) {
+        AdvancedSettingsScreen(viewModel = viewModel, onBack = { showAdvanced = false })
         return
     }
 
@@ -81,7 +90,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
             }
             when (selectedTab) {
                 0 -> GeneralTab(viewModel)
-                1 -> ConnectionTab(viewModel, onOpenAppRouting = { showAppRouting = true })
+                1 -> ConnectionTab(
+                    viewModel,
+                    onOpenAppRouting = { showAppRouting = true },
+                    onOpenAdvanced = { showAdvanced = true },
+                )
                 2 -> RoutingTab()
                 3 -> AntiDpiTab()
                 4 -> AboutTab(viewModel)
@@ -140,7 +153,7 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
 }
 
 @Composable
-private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> Unit) {
+private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> Unit, onOpenAdvanced: () -> Unit) {
     val tunnelMode by viewModel.tunnelMode.collectAsState()
     val appRoutingMode by viewModel.appRoutingMode.collectAsState()
     val selectedPackages by viewModel.selectedPackages.collectAsState()
@@ -240,6 +253,36 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
                 AppRoutingSummaryRow(count = selectedPackages.size, onClick = onOpenAppRouting)
             }
         }
+        item {
+            SettingsCard("ПРОИЗВОДИТЕЛЬНОСТЬ") {
+                NavRow(
+                    icon = Icons.Filled.Tune,
+                    title = "Расширенные настройки",
+                    subtitle = "Sniffing, таймауты, UDP, wakelock, логи",
+                    onClick = onOpenAdvanced,
+                )
+            }
+        }
+    }
+}
+
+/** Generic tappable row with a leading icon, two lines of text and a trailing chevron. */
+@Composable
+private fun NavRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
     }
 }
 
@@ -323,6 +366,108 @@ private fun AppRoutingScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AdvancedSettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
+    val sniffing by viewModel.sniffing.collectAsState()
+    val idleTimeout by viewModel.idleTimeoutSec.collectAsState()
+    val blockUdp by viewModel.blockUdp.collectAsState()
+    val keepAwake by viewModel.keepAwake.collectAsState()
+    val logRetention by viewModel.logRetentionHours.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Расширенные настройки") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Назад") }
+                },
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                SettingsCard("СОЕДИНЕНИЯ") {
+                    StepperRow(
+                        title = "Таймаут простоя",
+                        subtitle = "Секунд до закрытия неактивного соединения",
+                        value = idleTimeout,
+                        step = 30,
+                        range = 30..3600,
+                        onChange = viewModel::setIdleTimeoutSec,
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                    SwitchRow("Блокировать UDP", blockUdp, viewModel::setBlockUdp)
+                    HintText(
+                        "Ломает QUIC, DNS-over-UDP, голосовые звонки и игры. Включайте только если " +
+                            "знаете зачем (не применяется к конфигам «Автовыбор»).",
+                    )
+                }
+            }
+            item {
+                SettingsCard("СЕТЬ") {
+                    SwitchRow("Анализ трафика (Sniffing)", sniffing, viewModel::setSniffing)
+                    HintText(
+                        "Определяет домен из TLS/HTTP/QUIC, чтобы работали правила маршрутизации " +
+                            "(обход .ru, блок рекламы, балансировщик «Автовыбора»). Рекомендуется включённым.",
+                    )
+                }
+            }
+            item {
+                SettingsCard("ПИТАНИЕ") {
+                    SwitchRow("Держать устройство активным", keepAwake, viewModel::setKeepAwake)
+                    HintText(
+                        "Удерживает wakelock во время работы VPN. Нужно на Xiaomi/HyperOS; на других " +
+                            "устройствах может немного сильнее расходовать батарею.",
+                    )
+                }
+            }
+            item {
+                SettingsCard("ОТЛАДКА") {
+                    Text(
+                        "Хранение логов",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    SegmentedRow(
+                        options = listOf(
+                            1 to "1 ч",
+                            6 to "6 ч",
+                            24 to "24 ч",
+                            168 to "7 дн",
+                            0 to "Всегда",
+                        ),
+                        selected = logRetention,
+                        onSelect = viewModel::setLogRetentionHours,
+                    )
+                    HintText("Старые логи удаляются при запуске приложения. «Всегда» — не удалять.")
+                }
+            }
+        }
+    }
+}
+
+/** A label + subtitle with −/value/+ stepper controls on the right. */
+@Composable
+private fun StepperRow(title: String, subtitle: String, value: Int, step: Int, range: IntRange, onChange: (Int) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+        IconButton(onClick = { onChange((value - step).coerceIn(range)) }) {
+            Icon(Icons.Filled.Remove, contentDescription = "Меньше")
+        }
+        Text("$value", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        IconButton(onClick = { onChange((value + step).coerceIn(range)) }) {
+            Icon(Icons.Filled.Add, contentDescription = "Больше")
         }
     }
 }

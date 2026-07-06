@@ -63,5 +63,19 @@ class FileLogTree(context: Context) : Timber.Tree() {
 
     companion object {
         fun logsDirectory(context: Context): File = File(context.filesDir, "logs")
+
+        /**
+         * Deletes log files older than [retentionHours] (Настройки → Расширенные → «Хранение
+         * логов»). retentionHours <= 0 means keep forever. Called once at app start.
+         */
+        fun pruneOldLogs(context: Context, retentionHours: Int) {
+            if (retentionHours <= 0) return
+            val cutoff = System.currentTimeMillis() - retentionHours * 60L * 60L * 1000L
+            runCatching {
+                logsDirectory(context).listFiles()?.forEach { file ->
+                    if (file.lastModified() < cutoff) file.delete()
+                }
+            }
+        }
     }
 }

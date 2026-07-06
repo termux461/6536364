@@ -39,6 +39,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val killSwitch: StateFlow<Boolean> = prefs.killSwitch.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val pingMode: StateFlow<PingMode> = prefs.pingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), PingMode.PROXY_GET)
     val ipStackMode: StateFlow<IpStackMode> = prefs.ipStackMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), IpStackMode.BOTH)
+    val sniffing: StateFlow<Boolean> = prefs.sniffing.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val idleTimeoutSec: StateFlow<Int> = prefs.idleTimeoutSec.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 300)
+    val blockUdp: StateFlow<Boolean> = prefs.blockUdp.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val keepAwake: StateFlow<Boolean> = prefs.keepAwake.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val logRetentionHours: StateFlow<Int> = prefs.logRetentionHours.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1)
 
     // Enumerating installed apps + loading each one's label is a real PackageManager cost (can
     // take a noticeable moment with 100+ apps installed) - loading it eagerly/synchronously on
@@ -77,6 +82,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setKillSwitch(value: Boolean) = viewModelScope.launch { prefs.setKillSwitch(value) }
     fun setPingMode(value: PingMode) = viewModelScope.launch { prefs.setPingMode(value) }
     fun setIpStackMode(value: IpStackMode) = viewModelScope.launch { prefs.setIpStackMode(value) }
+    fun setSniffing(value: Boolean) = viewModelScope.launch { prefs.setSniffing(value) }
+    fun setIdleTimeoutSec(value: Int) = viewModelScope.launch { prefs.setIdleTimeoutSec(value.coerceIn(30, 3600)) }
+    fun setBlockUdp(value: Boolean) = viewModelScope.launch { prefs.setBlockUdp(value) }
+    fun setKeepAwake(value: Boolean) = viewModelScope.launch { prefs.setKeepAwake(value) }
+    fun setLogRetentionHours(value: Int) = viewModelScope.launch { prefs.setLogRetentionHours(value) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {
         viewModelScope.launch {

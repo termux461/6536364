@@ -16,9 +16,17 @@ import java.io.File
  */
 object HevSocks5Tunnel {
 
-    fun start(context: Context, tunFd: Int, socksPort: Int, mtu: Int, tunIpv4Client: String, tunIpv6Client: String? = null) {
+    fun start(
+        context: Context,
+        tunFd: Int,
+        socksPort: Int,
+        mtu: Int,
+        tunIpv4Client: String,
+        tunIpv6Client: String? = null,
+        idleTimeoutSec: Int = 300,
+    ) {
         val configFile = File(context.filesDir, "hev-socks5-tunnel.yaml").apply {
-            writeText(buildConfig(socksPort, mtu, tunIpv4Client, tunIpv6Client))
+            writeText(buildConfig(socksPort, mtu, tunIpv4Client, tunIpv6Client, idleTimeoutSec))
         }
         TProxyService.TProxyStartService(configFile.absolutePath, tunFd)
     }
@@ -27,7 +35,17 @@ object HevSocks5Tunnel {
         TProxyService.TProxyStopService()
     }
 
-    private fun buildConfig(socksPort: Int, mtu: Int, tunIpv4Client: String, tunIpv6Client: String?): String = buildString {
+    private fun buildConfig(
+        socksPort: Int,
+        mtu: Int,
+        tunIpv4Client: String,
+        tunIpv6Client: String?,
+        idleTimeoutSec: Int,
+    ): String = buildString {
+        // hev takes the read/write timeouts in milliseconds; the setting is exposed to users in
+        // seconds ("Таймаут простоя"). UDP flows are short-lived so they get a quarter of it.
+        val tcpTimeoutMs = idleTimeoutSec.coerceAtLeast(10) * 1000
+        val udpTimeoutMs = (tcpTimeoutMs / 5).coerceAtLeast(20000)
         appendLine("tunnel:")
         appendLine("  mtu: $mtu")
         appendLine("  ipv4: $tunIpv4Client")
@@ -39,8 +57,8 @@ object HevSocks5Tunnel {
         appendLine("  address: 127.0.0.1")
         appendLine("  udp: 'udp'")
         appendLine("misc:")
-        appendLine("  tcp-read-write-timeout: 300000")
-        appendLine("  udp-read-write-timeout: 60000")
+        appendLine("  tcp-read-write-timeout: $tcpTimeoutMs")
+        appendLine("  udp-read-write-timeout: $udpTimeoutMs")
         appendLine("  log-level: warn")
     }
 }

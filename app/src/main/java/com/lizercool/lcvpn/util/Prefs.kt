@@ -3,6 +3,7 @@ package com.lizercool.lcvpn.util
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lizercool.lcvpn.data.model.AppRoutingMode
@@ -32,6 +33,13 @@ class Prefs(private val context: Context) {
         val KILL_SWITCH = booleanPreferencesKey("kill_switch")
         val PING_MODE = stringPreferencesKey("ping_mode")
         val IP_STACK_MODE = stringPreferencesKey("ip_stack_mode")
+
+        // Advanced / performance tuning (Расширенные настройки).
+        val SNIFFING = booleanPreferencesKey("sniffing")
+        val IDLE_TIMEOUT_SEC = intPreferencesKey("idle_timeout_sec")
+        val BLOCK_UDP = booleanPreferencesKey("block_udp")
+        val KEEP_AWAKE = booleanPreferencesKey("keep_awake")
+        val LOG_RETENTION_HOURS = intPreferencesKey("log_retention_hours") // 0 = forever
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -58,6 +66,11 @@ class Prefs(private val context: Context) {
     val ipStackMode: Flow<IpStackMode> = context.dataStore.data.map {
         runCatching { IpStackMode.valueOf(it[Keys.IP_STACK_MODE] ?: "") }.getOrDefault(IpStackMode.BOTH)
     }
+    val sniffing: Flow<Boolean> = context.dataStore.data.map { it[Keys.SNIFFING] ?: true }
+    val idleTimeoutSec: Flow<Int> = context.dataStore.data.map { it[Keys.IDLE_TIMEOUT_SEC] ?: 300 }
+    val blockUdp: Flow<Boolean> = context.dataStore.data.map { it[Keys.BLOCK_UDP] ?: false }
+    val keepAwake: Flow<Boolean> = context.dataStore.data.map { it[Keys.KEEP_AWAKE] ?: false }
+    val logRetentionHours: Flow<Int> = context.dataStore.data.map { it[Keys.LOG_RETENTION_HOURS] ?: 1 }
 
     suspend fun setLanguage(value: String) = context.dataStore.edit { it[Keys.LANGUAGE] = value }
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[Keys.DARK_THEME] = value }
@@ -70,6 +83,11 @@ class Prefs(private val context: Context) {
     suspend fun setKillSwitch(value: Boolean) = context.dataStore.edit { it[Keys.KILL_SWITCH] = value }
     suspend fun setPingMode(value: PingMode) = context.dataStore.edit { it[Keys.PING_MODE] = value.name }
     suspend fun setIpStackMode(value: IpStackMode) = context.dataStore.edit { it[Keys.IP_STACK_MODE] = value.name }
+    suspend fun setSniffing(value: Boolean) = context.dataStore.edit { it[Keys.SNIFFING] = value }
+    suspend fun setIdleTimeoutSec(value: Int) = context.dataStore.edit { it[Keys.IDLE_TIMEOUT_SEC] = value }
+    suspend fun setBlockUdp(value: Boolean) = context.dataStore.edit { it[Keys.BLOCK_UDP] = value }
+    suspend fun setKeepAwake(value: Boolean) = context.dataStore.edit { it[Keys.KEEP_AWAKE] = value }
+    suspend fun setLogRetentionHours(value: Int) = context.dataStore.edit { it[Keys.LOG_RETENTION_HOURS] = value }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
         val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()

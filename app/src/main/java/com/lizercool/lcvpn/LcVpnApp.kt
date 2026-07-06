@@ -3,6 +3,11 @@ package com.lizercool.lcvpn
 import android.app.Application
 import com.lizercool.lcvpn.util.FileLogTree
 import com.lizercool.lcvpn.util.GeoAssets
+import com.lizercool.lcvpn.util.Prefs
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import libv2ray.Libv2ray
 import timber.log.Timber
 
@@ -12,6 +17,11 @@ class LcVpnApp : Application() {
         Timber.plant(Timber.DebugTree())
         Timber.plant(FileLogTree(this))
         Timber.i("LC VPN started, versionName=%s", BuildConfig.VERSION_NAME)
+
+        // Trim old logs per the user's retention setting (Расширенные → «Хранение логов»).
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { FileLogTree.pruneOldLogs(this@LcVpnApp, Prefs(this@LcVpnApp).logRetentionHours.first()) }
+        }
 
         // Xray-core resolves "geosite:"/"geoip:" routing rule prefixes by opening geoip.dat/
         // geosite.dat as plain files on disk - it can't read them straight out of the APK's
