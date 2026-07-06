@@ -16,9 +16,9 @@ import java.io.File
  */
 object HevSocks5Tunnel {
 
-    fun start(context: Context, tunFd: Int, socksPort: Int, mtu: Int, tunIpv4Client: String) {
+    fun start(context: Context, tunFd: Int, socksPort: Int, mtu: Int, tunIpv4Client: String, tunIpv6Client: String? = null) {
         val configFile = File(context.filesDir, "hev-socks5-tunnel.yaml").apply {
-            writeText(buildConfig(socksPort, mtu, tunIpv4Client))
+            writeText(buildConfig(socksPort, mtu, tunIpv4Client, tunIpv6Client))
         }
         TProxyService.TProxyStartService(configFile.absolutePath, tunFd)
     }
@@ -27,10 +27,13 @@ object HevSocks5Tunnel {
         TProxyService.TProxyStopService()
     }
 
-    private fun buildConfig(socksPort: Int, mtu: Int, tunIpv4Client: String): String = buildString {
+    private fun buildConfig(socksPort: Int, mtu: Int, tunIpv4Client: String, tunIpv6Client: String?): String = buildString {
         appendLine("tunnel:")
         appendLine("  mtu: $mtu")
         appendLine("  ipv4: $tunIpv4Client")
+        // Only advertise an IPv6 client address when the VpnService actually captured IPv6 too,
+        // so hev forwards those packets into the SOCKS proxy instead of dropping them.
+        if (!tunIpv6Client.isNullOrEmpty()) appendLine("  ipv6: '$tunIpv6Client'")
         appendLine("socks5:")
         appendLine("  port: $socksPort")
         appendLine("  address: 127.0.0.1")

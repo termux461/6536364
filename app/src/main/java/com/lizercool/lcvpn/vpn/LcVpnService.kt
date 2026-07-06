@@ -129,7 +129,7 @@ class LcVpnService : VpnService() {
                 if (!started) error("Proxy engine failed to start")
 
                 if (usesTun && tunFd != null) {
-                    HevSocks5Tunnel.start(this@LcVpnService, tunFd, socksPort, TUN_MTU, TUN_ADDRESS)
+                    HevSocks5Tunnel.start(this@LcVpnService, tunFd, socksPort, TUN_MTU, TUN_ADDRESS, TUN_ADDRESS_V6)
                     tun2SocksRunning = true
                     Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tunFd, socksPort)
                 }
@@ -180,6 +180,16 @@ class LcVpnService : VpnService() {
             .addDnsServer("8.8.8.8")
             .setMtu(TUN_MTU)
 
+        // Capture IPv6 too. Without an IPv6 address+route, every IPv6-capable app (YouTube,
+        // Google, Instagram, ...) reaches its destination over IPv6 straight past the tun - so
+        // "all traffic goes through the VPN" silently became "only the IPv4 half does", which is
+        // exactly the "не весь трафик" symptom. hev-socks5-tunnel is told about the same v6
+        // client address below so it forwards those packets into the SOCKS proxy.
+        runCatching {
+            builder.addAddress(TUN_ADDRESS_V6, 128)
+            builder.addRoute("::", 0)
+        }.onFailure { Timber.w(it, "Failed to add IPv6 tun address/route; IPv6 may leak") }
+
         applyAppRouting(builder, prefs)
 
         val pfd = builder.establish() ?: error("VpnService.Builder.establish() returned null (permission not granted?)")
@@ -195,13 +205,30 @@ class LcVpnService : VpnService() {
     private suspend fun applyAppRouting(builder: Builder, prefs: Prefs) {
         val db = AppDatabase.get(this)
         val selectedPackages = db.appRoutingRuleDao().observeAll().first().map { it.packageName }
-        if (selectedPackages.isEmpty()) return
-
         val mode = prefs.appRoutingMode.first()
+
+        if (selectedPackages.isNotEmpty() && mode == AppRoutingMode.ONLY_SELECTED) {
+            // Only-selected: just these apps' traffic enters the tunnel. Our own package isn't in
+            // the list, so Xray-core's own sockets stay off-tunnel automatically - and Android
+            // forbids mixing addAllowed* with addDisallowed*, so we can't also exclude ourselves
+            // explicitly here (we don't need to).
+            runCatching {
+                selectedPackages.forEach { builder.addAllowedApplication(it) }
+            }.onFailure { Timber.w(it, "Failed applying per-app allow rule") }
+            return
+        }
+
+        // Default (nothing selected) and all-except-selected: everything is tunnelled except the
+        // excluded apps. Our OWN package must always be excluded: Xray-core and hev-socks5-tunnel
+        // both run inside this process, and if Xray's outbound sockets to the VPN server were
+        // themselves routed back into the tun they'd loop forever - which is why hardly any
+        // traffic actually made it out. Excluding ourselves is the standard tun2socks fix.
         runCatching {
-            when (mode) {
-                AppRoutingMode.ONLY_SELECTED -> selectedPackages.forEach { builder.addAllowedApplication(it) }
-                AppRoutingMode.ALL_EXCEPT_SELECTED -> selectedPackages.forEach { builder.addDisallowedApplication(it) }
+            builder.addDisallowedApplication(packageName)
+            if (mode == AppRoutingMode.ALL_EXCEPT_SELECTED) {
+                selectedPackages.forEach { pkg ->
+                    if (pkg != packageName) builder.addDisallowedApplication(pkg)
+                }
             }
         }.onFailure { Timber.w(it, "Failed applying per-app routing rule") }
     }
@@ -336,6 +363,7 @@ class LcVpnService : VpnService() {
         private const val ERROR_NOTIFICATION_ID = 2
         private const val KILL_SWITCH_RETRY_DELAY_MS = 5000L
         private const val TUN_ADDRESS = "10.10.10.1"
+        private const val TUN_ADDRESS_V6 = "fd00:1:2:3::1"
         private const val TUN_MTU = 1500
         const val LAN_PROXY_PORT = 10809
 

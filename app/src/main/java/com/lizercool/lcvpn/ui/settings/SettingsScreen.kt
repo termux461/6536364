@@ -27,9 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -66,9 +69,13 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
 
     Scaffold(topBar = { TopAppBar(title = { Text("Настройки") }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = selectedTab) {
+            ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 12.dp) {
                 tabTitles.forEachIndexed { index, title ->
-                    Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) })
+                    Tab(
+                        selected = selectedTab == index,
+                        onClick = { selectedTab = index },
+                        text = { Text(title, maxLines = 1, softWrap = false) },
+                    )
                 }
             }
             when (selectedTab) {
@@ -113,9 +120,9 @@ private fun GeneralTab(viewModel: SettingsViewModel) {
             SettingsCard("СПИСОК СЕРВЕРОВ") {
                 SegmentedRow(
                     options = listOf(
-                        ServerListSort.NONE to "Без сортировки",
-                        ServerListSort.PING to "По пингу",
-                        ServerListSort.ALPHABETICAL to "По алфавиту",
+                        ServerListSort.NONE to "Обычный",
+                        ServerListSort.PING to "Пинг",
+                        ServerListSort.ALPHABETICAL to "А–Я",
                     ),
                     selected = sortOrder,
                     onSelect = viewModel::setSortOrder,
@@ -145,11 +152,18 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
                 SegmentedRow(
                     options = listOf(
                         TunnelMode.PROXY to "Прокси",
-                        TunnelMode.TUN to "TUN (полный VPN)",
-                        TunnelMode.TUN_AND_PROXY to "TUN + прокси",
+                        TunnelMode.TUN to "TUN",
+                        TunnelMode.TUN_AND_PROXY to "TUN+прокси",
                     ),
                     selected = tunnelMode,
                     onSelect = viewModel::setTunnelMode,
+                )
+                HintText(
+                    when (tunnelMode) {
+                        TunnelMode.PROXY -> "Локальный SOCKS-прокси. Трафик идёт только из приложений, которые сами умеют в прокси."
+                        TunnelMode.TUN -> "Полный VPN — весь трафик устройства идёт через сервер."
+                        TunnelMode.TUN_AND_PROXY -> "Полный VPN + прокси в локальной сети для других устройств."
+                    },
                 )
                 if (tunnelMode == TunnelMode.TUN_AND_PROXY) {
                     HintText(
@@ -193,7 +207,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
             SettingsCard("ЧТО ПУСКАТЬ ЧЕРЕЗ VPN") {
                 SegmentedRow(
                     options = listOf(
-                        AppRoutingMode.ALL_EXCEPT_SELECTED to "Все, кроме выбранных",
+                        AppRoutingMode.ALL_EXCEPT_SELECTED to "Кроме выбранных",
                         AppRoutingMode.ONLY_SELECTED to "Только выбранные",
                     ),
                     selected = appRoutingMode,
@@ -405,20 +419,20 @@ private fun <T> OptionColumn(options: List<Triple<T, String, String>>, selected:
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun <T> SegmentedRow(options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        options.forEach { (value, label) ->
-            val isSelected = value == selected
-            Button(
+    // Material3's segmented button keeps each label on one line and sizes the segments evenly,
+    // instead of the old fixed-width Buttons that broke long labels mid-word ("Без сортиров ки").
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (value, label) ->
+            SegmentedButton(
+                selected = value == selected,
                 onClick = { onSelect(value) },
-                modifier = Modifier.fillMaxWidth(1f / options.size).padding(2.dp),
-                colors = if (isSelected) {
-                    androidx.compose.material3.ButtonDefaults.buttonColors()
-                } else {
-                    androidx.compose.material3.ButtonDefaults.outlinedButtonColors()
-                },
-            ) { Text(label) }
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+            ) {
+                Text(label, maxLines = 1, softWrap = false, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }
