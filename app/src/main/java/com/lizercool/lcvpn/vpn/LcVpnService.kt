@@ -11,6 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.lizercool.lcvpn.R
 import com.lizercool.lcvpn.data.db.AppDatabase
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
 import com.lizercool.lcvpn.util.Formatting
@@ -100,9 +101,9 @@ class LcVpnService : VpnService() {
                     server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword, geoRouting = geoRouting,
                 )
 
-                var tunFd: Int? = null
+                var tun: TunResult? = null
                 if (usesTun) {
-                    tunFd = establishTun(prefs)
+                    tun = establishTun(prefs)
                 }
 
                 // Xray-core is only ever used here for its own local SOCKS inbound (see
@@ -128,10 +129,11 @@ class LcVpnService : VpnService() {
                 }
                 if (!started) error("Proxy engine failed to start")
 
-                if (usesTun && tunFd != null) {
-                    HevSocks5Tunnel.start(this@LcVpnService, tunFd, socksPort, TUN_MTU, TUN_ADDRESS, TUN_ADDRESS_V6)
+                if (usesTun && tun != null) {
+                    val v6 = if (tun.hasIpv6) TUN_ADDRESS_V6 else null
+                    HevSocks5Tunnel.start(this@LcVpnService, tun.fd, socksPort, TUN_MTU, TUN_ADDRESS, v6)
                     tun2SocksRunning = true
-                    Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tunFd, socksPort)
+                    Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tun.fd, socksPort)
                 }
                 if (tunnelMode == TunnelMode.TUN_AND_PROXY) {
                     Timber.i("LAN proxy listening on 0.0.0.0:%d (user=lcvpn)", LAN_PROXY_PORT)
@@ -171,24 +173,38 @@ class LcVpnService : VpnService() {
     private fun findFreeLoopbackPort(): Int =
         java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
 
-    private suspend fun establishTun(prefs: Prefs): Int {
+    private data class TunResult(val fd: Int, val hasIpv6: Boolean)
+
+    private suspend fun establishTun(prefs: Prefs): TunResult {
+        // User-selectable IP stack (Настройки → Подключение → «IP-стек»):
+        //   BOTH (default) captures IPv4 + IPv6, IPV4_ONLY / IPV6_ONLY capture just the one.
+        val ipStackMode = prefs.ipStackMode.first()
+        val useV4 = ipStackMode != IpStackMode.IPV6_ONLY
+        val useV6 = ipStackMode != IpStackMode.IPV4_ONLY
+
         val builder = Builder()
             .setSession(getString(R.string.app_name))
-            .addAddress(TUN_ADDRESS, 32)
-            .addRoute("0.0.0.0", 0)
             .addDnsServer("1.1.1.1")
             .addDnsServer("8.8.8.8")
             .setMtu(TUN_MTU)
 
-        // Capture IPv6 too. Without an IPv6 address+route, every IPv6-capable app (YouTube,
-        // Google, Instagram, ...) reaches its destination over IPv6 straight past the tun - so
-        // "all traffic goes through the VPN" silently became "only the IPv4 half does", which is
-        // exactly the "не весь трафик" symptom. hev-socks5-tunnel is told about the same v6
-        // client address below so it forwards those packets into the SOCKS proxy.
-        runCatching {
-            builder.addAddress(TUN_ADDRESS_V6, 128)
-            builder.addRoute("::", 0)
-        }.onFailure { Timber.w(it, "Failed to add IPv6 tun address/route; IPv6 may leak") }
+        if (useV4) {
+            builder.addAddress(TUN_ADDRESS, 32)
+            builder.addRoute("0.0.0.0", 0)
+        }
+        // Capturing IPv6 matters because without an IPv6 address+route every IPv6-capable app
+        // (YouTube, Google, Instagram, ...) reaches its destination over IPv6 straight past the
+        // tun - so "all traffic goes through the VPN" silently becomes "only the IPv4 half does".
+        // hev-socks5-tunnel is told about the same v6 client address so it forwards those packets
+        // into the SOCKS proxy.
+        var hasIpv6 = false
+        if (useV6) {
+            runCatching {
+                builder.addAddress(TUN_ADDRESS_V6, 128)
+                builder.addRoute("::", 0)
+                hasIpv6 = true
+            }.onFailure { Timber.w(it, "Failed to add IPv6 tun address/route; IPv6 may leak") }
+        }
 
         applyAppRouting(builder, prefs)
 
@@ -199,7 +215,7 @@ class LcVpnService : VpnService() {
         val previous = parcelFileDescriptor
         parcelFileDescriptor = pfd
         previous?.close()
-        return pfd.fd
+        return TunResult(pfd.fd, hasIpv6)
     }
 
     private suspend fun applyAppRouting(builder: Builder, prefs: Prefs) {

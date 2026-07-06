@@ -31,3 +31,12 @@ enum class ServerListSort { NONE, PING, ALPHABETICAL }
  *   reflects real usable latency, at the cost of taking longer per server.
  */
 enum class PingMode { TCP, ICMP, PROXY_HEAD, PROXY_GET }
+
+/**
+ * Which IP versions the TUN interface captures and routes.
+ * - BOTH: capture IPv4 + IPv6 (default) - everything goes through the VPN.
+ * - IPV4_ONLY: capture only IPv4; IPv6 is left to the system (may leak past the VPN, but avoids
+ *   trouble on networks/servers where proxied IPv6 misbehaves).
+ * - IPV6_ONLY: capture only IPv6 (rarely needed, exposed for completeness).
+ */
+enum class IpStackMode { BOTH, IPV4_ONLY, IPV6_ONLY }

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.PingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
@@ -30,6 +31,7 @@ class Prefs(private val context: Context) {
         val LAN_PROXY_PASSWORD = stringPreferencesKey("lan_proxy_password")
         val KILL_SWITCH = booleanPreferencesKey("kill_switch")
         val PING_MODE = stringPreferencesKey("ping_mode")
+        val IP_STACK_MODE = stringPreferencesKey("ip_stack_mode")
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -53,6 +55,9 @@ class Prefs(private val context: Context) {
     val pingMode: Flow<PingMode> = context.dataStore.data.map {
         runCatching { PingMode.valueOf(it[Keys.PING_MODE] ?: "") }.getOrDefault(PingMode.PROXY_GET)
     }
+    val ipStackMode: Flow<IpStackMode> = context.dataStore.data.map {
+        runCatching { IpStackMode.valueOf(it[Keys.IP_STACK_MODE] ?: "") }.getOrDefault(IpStackMode.BOTH)
+    }
 
     suspend fun setLanguage(value: String) = context.dataStore.edit { it[Keys.LANGUAGE] = value }
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[Keys.DARK_THEME] = value }
@@ -64,6 +69,7 @@ class Prefs(private val context: Context) {
         context.dataStore.edit { it[Keys.APP_ROUTING_MODE] = value.name }
     suspend fun setKillSwitch(value: Boolean) = context.dataStore.edit { it[Keys.KILL_SWITCH] = value }
     suspend fun setPingMode(value: PingMode) = context.dataStore.edit { it[Keys.PING_MODE] = value.name }
+    suspend fun setIpStackMode(value: IpStackMode) = context.dataStore.edit { it[Keys.IP_STACK_MODE] = value.name }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
         val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()

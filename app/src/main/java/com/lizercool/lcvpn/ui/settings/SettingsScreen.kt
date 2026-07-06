@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.BuildConfig
 import com.lizercool.lcvpn.data.model.AppRoutingMode
+import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.PingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
@@ -145,6 +146,7 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
     val selectedPackages by viewModel.selectedPackages.collectAsState()
     val lanProxyPassword by viewModel.lanProxyPassword.collectAsState()
     val killSwitch by viewModel.killSwitch.collectAsState()
+    val ipStackMode by viewModel.ipStackMode.collectAsState()
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -172,6 +174,28 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
                             "Адрес: ${viewModel.lanProxyAddress}\n" +
                             "Логин: lcvpn\n" +
                             "Пароль: $lanProxyPassword",
+                    )
+                }
+            }
+        }
+        if (tunnelMode != TunnelMode.PROXY) {
+            item {
+                SettingsCard("IP-СТЕК") {
+                    SegmentedRow(
+                        options = listOf(
+                            IpStackMode.BOTH to "IPv4+IPv6",
+                            IpStackMode.IPV4_ONLY to "IPv4",
+                            IpStackMode.IPV6_ONLY to "IPv6",
+                        ),
+                        selected = ipStackMode,
+                        onSelect = viewModel::setIpStackMode,
+                    )
+                    HintText(
+                        when (ipStackMode) {
+                            IpStackMode.BOTH -> "Через VPN идёт и IPv4, и IPv6 (рекомендуется — ничего не утекает мимо туннеля)."
+                            IpStackMode.IPV4_ONLY -> "Через VPN идёт только IPv4. IPv6-трафик пойдёт напрямую, мимо VPN."
+                            IpStackMode.IPV6_ONLY -> "Через VPN идёт только IPv6. Нужно редко."
+                        },
                     )
                 }
             }
