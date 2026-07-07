@@ -16,6 +16,7 @@ import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.ui.MainActivity
 import com.lizercool.lcvpn.util.Formatting
 import com.lizercool.lcvpn.util.GeoAssets
+import com.lizercool.lcvpn.util.MemoryMonitor
 import com.lizercool.lcvpn.util.Prefs
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,7 @@ class LcVpnService : VpnService() {
     private var killSwitchRetryJob: Job? = null
     private var tun2SocksRunning = false
     private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var currentTunnelMode: TunnelMode? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -88,6 +90,7 @@ class LcVpnService : VpnService() {
                 val server = db.serverDao().observeSelected().first() ?: error("No server selected")
 
                 val tunnelMode = prefs.tunnelMode.first()
+                currentTunnelMode = tunnelMode
                 // Not hardcoded to the conventional 10808: that's the default local SOCKS port
                 // for many v2ray/xray-based apps, so if another one is also running it can
                 // squat that exact port with nothing we can do about it (we can't stop another
@@ -414,11 +417,32 @@ class LcVpnService : VpnService() {
         ensureNotificationChannel()
         val elapsed = Formatting.elapsed(connectedAt)
         val speedLine = "↓ ${Formatting.speed(stats.downlinkBytesPerSec)}   ↑ ${Formatting.speed(stats.uplinkBytesPerSec)}"
+        val modeLabel = when (currentTunnelMode) {
+            TunnelMode.TUN -> "VPN"
+            TunnelMode.TUN_AND_PROXY -> "VPN + прокси"
+            TunnelMode.PROXY -> "Прокси"
+            null -> "Подключено"
+        }
+        val memMb = MemoryMonitor.usedMb()
 
         return baseNotificationBuilder()
-            .setContentTitle("$serverName · $elapsed")
+            .setContentTitle(serverName)
             .setContentText(speedLine)
+            .setSubText("$modeLabel · $elapsed")
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText("$speedLine\n⏱ $elapsed   ▪ RAM $memMb МБ"),
+            )
+            .addAction(disconnectAction())
             .build()
+    }
+
+    private fun disconnectAction(): NotificationCompat.Action {
+        val intent = Intent(this, LcVpnService::class.java).setAction(ACTION_DISCONNECT)
+        val pending = PendingIntent.getService(
+            this, 1, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        return NotificationCompat.Action.Builder(0, "Отключить", pending).build()
     }
 
     private fun ensureNotificationChannel() {
@@ -434,7 +458,11 @@ class LcVpnService : VpnService() {
             PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
+            // Transparent-background white silhouette so the status bar / shade doesn't show a
+            // dark square inside a white circle (setSmallIcon requires a monochrome icon).
+            .setSmallIcon(R.drawable.ic_stat_shield)
+            .setColor(0xFF22C55E.toInt())
+            .setColorized(true)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent)

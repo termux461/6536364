@@ -56,6 +56,10 @@ class Prefs(private val context: Context) {
         val FRAGMENT_INTERVAL = stringPreferencesKey("fragment_interval")
         val MUX_ENABLED = booleanPreferencesKey("mux_enabled")
         val MUX_CONCURRENCY = intPreferencesKey("mux_concurrency")
+
+        // Memory cap for the Go (Xray-core) runtime.
+        val MEMORY_LIMIT_MB = intPreferencesKey("memory_limit_mb")
+        val MEMORY_UNLIMITED = booleanPreferencesKey("memory_unlimited")
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -66,10 +70,9 @@ class Prefs(private val context: Context) {
     val connectOnLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.CONNECT_ON_LAUNCH] ?: false }
     val updateOnLaunch: Flow<Boolean> = context.dataStore.data.map { it[Keys.UPDATE_ON_LAUNCH] ?: false }
     val tunnelMode: Flow<TunnelMode> = context.dataStore.data.map {
-        // Defaults to PROXY until TUN mode (now bridged via hev-socks5-tunnel, see
-        // LcVpnService) has been confirmed working on a real device - flip this default once
-        // that's verified.
-        runCatching { TunnelMode.valueOf(it[Keys.TUNNEL_MODE] ?: "") }.getOrDefault(TunnelMode.PROXY)
+        // TUN + Proxy by default: full-device VPN plus a password-protected LAN SOCKS proxy other
+        // devices on the same Wi-Fi can use. Confirmed working on real devices.
+        runCatching { TunnelMode.valueOf(it[Keys.TUNNEL_MODE] ?: "") }.getOrDefault(TunnelMode.TUN_AND_PROXY)
     }
     val appRoutingMode: Flow<AppRoutingMode> = context.dataStore.data.map {
         runCatching { AppRoutingMode.valueOf(it[Keys.APP_ROUTING_MODE] ?: "") }
@@ -118,6 +121,13 @@ class Prefs(private val context: Context) {
         )
     }
 
+    val memoryLimitMb: Flow<Int> = context.dataStore.data.map { it[Keys.MEMORY_LIMIT_MB] ?: 100 }
+    val memoryUnlimited: Flow<Boolean> = context.dataStore.data.map { it[Keys.MEMORY_UNLIMITED] ?: false }
+
+    /** Read synchronously at app start (before Xray-core loads) to set the Go runtime env. */
+    suspend fun memoryLimitMbOnce(): Int = context.dataStore.data.map { it[Keys.MEMORY_LIMIT_MB] ?: 100 }.first()
+    suspend fun memoryUnlimitedOnce(): Boolean = context.dataStore.data.map { it[Keys.MEMORY_UNLIMITED] ?: false }.first()
+
     private fun splitDomains(raw: String?): List<String> =
         raw?.split(',', '\n', ' ')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
 
@@ -146,6 +156,8 @@ class Prefs(private val context: Context) {
     suspend fun setFragmentInterval(value: String) = context.dataStore.edit { it[Keys.FRAGMENT_INTERVAL] = value }
     suspend fun setMuxEnabled(value: Boolean) = context.dataStore.edit { it[Keys.MUX_ENABLED] = value }
     suspend fun setMuxConcurrency(value: Int) = context.dataStore.edit { it[Keys.MUX_CONCURRENCY] = value }
+    suspend fun setMemoryLimitMb(value: Int) = context.dataStore.edit { it[Keys.MEMORY_LIMIT_MB] = value }
+    suspend fun setMemoryUnlimited(value: Boolean) = context.dataStore.edit { it[Keys.MEMORY_UNLIMITED] = value }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
         val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()

@@ -54,6 +54,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val fragmentInterval: StateFlow<String> = prefs.fragmentInterval.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "10-20")
     val muxEnabled: StateFlow<Boolean> = prefs.muxEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val muxConcurrency: StateFlow<Int> = prefs.muxConcurrency.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 8)
+    val memoryLimitMb: StateFlow<Int> = prefs.memoryLimitMb.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 100)
+    val memoryUnlimited: StateFlow<Boolean> = prefs.memoryUnlimited.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     // Enumerating installed apps + loading each one's label is a real PackageManager cost (can
     // take a noticeable moment with 100+ apps installed) - loading it eagerly/synchronously on
@@ -106,6 +108,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setFragmentInterval(value: String) = viewModelScope.launch { prefs.setFragmentInterval(value) }
     fun setMuxEnabled(value: Boolean) = viewModelScope.launch { prefs.setMuxEnabled(value) }
     fun setMuxConcurrency(value: Int) = viewModelScope.launch { prefs.setMuxConcurrency(value.coerceIn(1, 128)) }
+    fun setMemoryLimitMb(value: Int) = viewModelScope.launch { prefs.setMemoryLimitMb(value) }
+    fun setMemoryUnlimited(value: Boolean) = viewModelScope.launch { prefs.setMemoryUnlimited(value) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {
         viewModelScope.launch {

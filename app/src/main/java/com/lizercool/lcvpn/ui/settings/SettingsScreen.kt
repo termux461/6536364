@@ -455,6 +455,29 @@ private fun AdvancedSettingsScreen(viewModel: SettingsViewModel, onBack: () -> U
                 }
             }
             item {
+                val memoryLimit by viewModel.memoryLimitMb.collectAsState()
+                val memoryUnlimited by viewModel.memoryUnlimited.collectAsState()
+                SettingsCard("ПАМЯТЬ") {
+                    Text(
+                        "Предел памяти ядра" + if (memoryUnlimited) " (снят)" else ": $memoryLimit МБ",
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    if (!memoryUnlimited) {
+                        SegmentedRow(
+                            options = listOf(40 to "40", 60 to "60", 80 to "80", 100 to "100", 150 to "150"),
+                            selected = memoryLimit,
+                            onSelect = viewModel::setMemoryLimitMb,
+                        )
+                    }
+                    SwitchRow("Снять ограничение", memoryUnlimited, viewModel::setMemoryUnlimited)
+                    HintText(
+                        "Ограничивает память Xray-ядра (GOMEMLIMIT). Меньше — экономнее, больше — " +
+                            "стабильнее под нагрузкой. Применяется после перезапуска приложения.",
+                    )
+                }
+            }
+            item {
                 SettingsCard("ОТЛАДКА") {
                     Text(
                         "Хранение логов",

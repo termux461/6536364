@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Card
@@ -39,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -118,6 +120,8 @@ fun HomeScreen(
             ElapsedTimer(sinceEpochMs = state.sinceEpochMs)
             Spacer(Modifier.height(24.dp))
             SpeedRow(uiState.stats)
+            Spacer(Modifier.height(12.dp))
+            MemoryReadout()
             Spacer(Modifier.height(24.dp))
         }
 
@@ -247,6 +251,30 @@ private fun ExpandingRing(progress: Float, color: Color) {
             .alpha((1f - progress) * 0.5f)
             .border(2.dp, color, CircleShape),
     )
+}
+
+@Composable
+private fun MemoryReadout() {
+    var mb by remember { mutableIntStateOf(com.lizercool.lcvpn.util.MemoryMonitor.usedMb()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            mb = com.lizercool.lcvpn.util.MemoryMonitor.usedMb()
+            delay(2000)
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Memory,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            "  RAM · $mb МБ",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
 }
 
 @Composable

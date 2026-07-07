@@ -23,6 +23,20 @@ class LcVpnApp : Application() {
             runCatching { FileLogTree.pruneOldLogs(this@LcVpnApp, Prefs(this@LcVpnApp).logRetentionHours.first()) }
         }
 
+        // Cap / tune the Go (Xray-core) runtime's memory BEFORE the native lib loads. GODEBUG
+        // madvdontneed=1 makes Go hand freed pages back to the OS promptly (much lower reported
+        // RSS on Android); GOMEMLIMIT sets a soft cap the GC targets. Both are read from the
+        // process env at Go runtime init, so this has to run before any libv2ray call.
+        runCatching {
+            val prefs = Prefs(this)
+            val unlimited = kotlinx.coroutines.runBlocking { prefs.memoryUnlimitedOnce() }
+            android.system.Os.setenv("GODEBUG", "madvdontneed=1", true)
+            if (!unlimited) {
+                val mb = kotlinx.coroutines.runBlocking { prefs.memoryLimitMbOnce() }
+                android.system.Os.setenv("GOMEMLIMIT", "${mb}MiB", true)
+            }
+        }.onFailure { Timber.w(it, "Failed to apply Go memory limit env") }
+
         // Xray-core resolves "geosite:"/"geoip:" routing rule prefixes by opening geoip.dat/
         // geosite.dat as plain files on disk - it can't read them straight out of the APK's
         // assets/, so they're extracted to real storage first and that real directory is what
