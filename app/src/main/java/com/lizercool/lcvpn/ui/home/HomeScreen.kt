@@ -3,12 +3,15 @@ package com.lizercool.lcvpn.ui.home
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -184,34 +188,65 @@ private fun ConnectCircle(state: ConnectionState, onClick: () -> Unit) {
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
     }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "connect-pulse")
+    val infiniteTransition = rememberInfiniteTransition(label = "connect")
+    // Slow breathing glow while connecting/connected.
     val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+        initialValue = 0.25f,
+        targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(tween(1100), RepeatMode.Reverse),
         label = "pulse-alpha",
     )
+    // Two concentric rings expanding outward and fading - a "radar" sweep, only while active.
+    val active = connected || connecting
+    val wave1 by infiniteTransition.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(2200), RepeatMode.Restart), label = "wave1",
+    )
+    val wave2 by infiniteTransition.animateFloat(
+        0f, 1f, infiniteRepeatable(tween(2200, delayMillis = 1100), RepeatMode.Restart), label = "wave2",
+    )
 
-    Box(
-        modifier = Modifier
-            .size(220.dp)
-            .border(2.dp, ringColor.copy(alpha = if (connecting) pulseAlpha else 1f), CircleShape)
-            .padding(16.dp)
-            .background(ringColor.copy(alpha = 0.08f), CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        AnimatedContent(targetState = error, label = "connect-icon") { isError ->
-            Icon(
-                imageVector = if (isError) Icons.Filled.ErrorOutline else Icons.Filled.PowerSettingsNew,
-                contentDescription = null,
-                tint = ringColor,
-                modifier = Modifier
-                    .size(64.dp)
-                    .alpha(if (connecting) pulseAlpha else 1f),
-            )
+    // No Material ripple (the white flash) - a subtle press-scale instead.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.93f else 1f, tween(140), label = "press-scale")
+
+    Box(modifier = Modifier.size(260.dp), contentAlignment = Alignment.Center) {
+        if (active) {
+            ExpandingRing(progress = wave1, color = ringColor)
+            ExpandingRing(progress = wave2, color = ringColor)
+        }
+        Box(
+            modifier = Modifier
+                .size(220.dp)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .border(2.dp, ringColor.copy(alpha = if (active) pulseAlpha else 0.9f), CircleShape)
+                .background(ringColor.copy(alpha = if (active) 0.12f else 0.06f), CircleShape)
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            AnimatedContent(targetState = error, label = "connect-icon") { isError ->
+                Icon(
+                    imageVector = if (isError) Icons.Filled.ErrorOutline else Icons.Filled.PowerSettingsNew,
+                    contentDescription = null,
+                    tint = ringColor,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .alpha(if (connecting) pulseAlpha else 1f),
+                )
+            }
         }
     }
+}
+
+/** A ring that grows from the button edge outward while fading to transparent. */
+@Composable
+private fun ExpandingRing(progress: Float, color: Color) {
+    Box(
+        modifier = Modifier
+            .size(220.dp + 40.dp * progress)
+            .alpha((1f - progress) * 0.5f)
+            .border(2.dp, color, CircleShape),
+    )
 }
 
 @Composable

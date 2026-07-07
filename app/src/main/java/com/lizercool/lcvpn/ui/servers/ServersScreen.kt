@@ -138,34 +138,38 @@ private fun ServerRow(server: ServerEntity, onClick: () -> Unit) {
         Row(
             modifier = Modifier.padding(16.dp).fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(server.countryFlagEmoji.ifBlank { "🌐" }, style = MaterialTheme.typography.headlineSmall)
-                Column(modifier = Modifier.padding(start = 12.dp)) {
-                    Text(server.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                    Text(server.protocol.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                }
+            Text(server.countryFlagEmoji.ifBlank { "🌐" }, style = MaterialTheme.typography.headlineSmall)
+            // weight(1f) lets the name column take the remaining space and ellipsize a long name
+            // instead of squeezing the ping badge into a sliver (which was wrapping "224ms" into
+            // "22 / 4m / s").
+            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
+                Text(
+                    server.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
+                Text(server.protocol.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PingBadge(server.lastPingMs)
-                if (server.isSelected) {
-                    Icon(
-                        Icons.Filled.CheckCircle,
-                        contentDescription = "Выбран",
-                        tint = PingGreen,
-                        modifier = Modifier.padding(start = 8.dp).size(20.dp),
-                    )
-                }
+            PingBadge(server.lastPingMs, modifier = Modifier.padding(start = 8.dp))
+            if (server.isSelected) {
+                Icon(
+                    Icons.Filled.CheckCircle,
+                    contentDescription = "Выбран",
+                    tint = PingGreen,
+                    modifier = Modifier.padding(start = 8.dp).size(20.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PingBadge(pingMs: Int?) {
+private fun PingBadge(pingMs: Int?, modifier: Modifier = Modifier) {
     if (pingMs == null) {
-        Text("—", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
+        Text("—", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f), modifier = modifier)
         return
     }
     val color = when {
@@ -174,10 +178,17 @@ private fun PingBadge(pingMs: Int?) {
         else -> PingRed
     }
     Box(
-        modifier = Modifier
+        modifier = modifier
             .background(color.copy(alpha = 0.12f), CircleShape)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
-        Text("${pingMs}ms", color = color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Text(
+            "${pingMs}ms",
+            color = color,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }

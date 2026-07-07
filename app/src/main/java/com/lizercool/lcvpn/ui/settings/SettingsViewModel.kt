@@ -99,4 +99,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun shareLogsIntent() = LogSharing.shareLogsIntent(getApplication())
+    fun readLogs(): String = LogSharing.readLogs(getApplication())
+    fun clearLogs() = LogSharing.clearLogs(getApplication())
 }

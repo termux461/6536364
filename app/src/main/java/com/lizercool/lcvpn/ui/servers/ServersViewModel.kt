@@ -1,12 +1,15 @@
 package com.lizercool.lcvpn.ui.servers
 
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lizercool.lcvpn.data.db.AppDatabase
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.network.ping.PingTester
 import com.lizercool.lcvpn.util.Prefs
+import com.lizercool.lcvpn.vpn.ConnectionState
+import com.lizercool.lcvpn.vpn.LcVpnService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -29,6 +32,14 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             db.serverDao().clearSelection()
             db.serverDao().select(server.id)
+            // If the VPN is already up, switch to the newly-selected server live by asking the
+            // service to restart Xray-core (and the tun bridge) with it - no manual reconnect.
+            val state = LcVpnService.stateFlow.value
+            if (state is ConnectionState.Connected || state is ConnectionState.Connecting) {
+                val ctx = getApplication<Application>()
+                val intent = Intent(ctx, LcVpnService::class.java).setAction(LcVpnService.ACTION_RECONNECT)
+                runCatching { ctx.startForegroundService(intent) }
+            }
         }
     }
 

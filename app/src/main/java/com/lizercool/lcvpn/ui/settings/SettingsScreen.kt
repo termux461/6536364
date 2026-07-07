@@ -1,23 +1,35 @@
 package com.lizercool.lcvpn.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,6 +52,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,9 +61,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.BuildConfig
 import com.lizercool.lcvpn.data.model.AppRoutingMode
@@ -67,6 +86,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAppRouting by remember { mutableStateOf(false) }
     var showAdvanced by remember { mutableStateOf(false) }
+    var showLogs by remember { mutableStateOf(false) }
 
     if (showAppRouting) {
         AppRoutingScreen(viewModel = viewModel, onBack = { showAppRouting = false })
@@ -74,6 +94,10 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
     }
     if (showAdvanced) {
         AdvancedSettingsScreen(viewModel = viewModel, onBack = { showAdvanced = false })
+        return
+    }
+    if (showLogs) {
+        LogViewerScreen(viewModel = viewModel, onBack = { showLogs = false })
         return
     }
 
@@ -97,7 +121,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                 )
                 2 -> RoutingTab()
                 3 -> AntiDpiTab()
-                4 -> AboutTab(viewModel)
+                4 -> AboutTab(viewModel, onOpenLogs = { showLogs = true })
             }
         }
     }
@@ -182,12 +206,12 @@ private fun ConnectionTab(viewModel: SettingsViewModel, onOpenAppRouting: () -> 
                 )
                 if (tunnelMode == TunnelMode.TUN_AND_PROXY) {
                     HintText(
-                        "Полный VPN на все приложения + SOCKS5-прокси в локальной сети, " +
-                            "чтобы этим же подключением мог пользоваться другой телефон/ПК на том же Wi-Fi.\n\n" +
-                            "Адрес: ${viewModel.lanProxyAddress}\n" +
-                            "Логин: lcvpn\n" +
-                            "Пароль: $lanProxyPassword",
+                        "Полный VPN на все приложения + SOCKS5-прокси в локальной сети, чтобы этим же " +
+                            "подключением мог пользоваться другой телефон/ПК на том же Wi-Fi.",
                     )
+                    CopyRow(label = "Адрес", value = viewModel.lanProxyAddress)
+                    CopyRow(label = "Логин", value = "lcvpn")
+                    CopyRow(label = "Пароль", value = lanProxyPassword)
                 }
             }
         }
@@ -499,7 +523,7 @@ private fun AntiDpiTab() {
 }
 
 @Composable
-private fun AboutTab(viewModel: SettingsViewModel) {
+private fun AboutTab(viewModel: SettingsViewModel, onOpenLogs: () -> Unit) {
     val context = LocalContext.current
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Text("Lizercool (LC VPN)", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -509,12 +533,93 @@ private fun AboutTab(viewModel: SettingsViewModel) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
 
-        SettingsCard("ПОДДЕРЖКА", modifier = Modifier.padding(top = 16.dp)) {
-            Button(onClick = {
-                val intent = viewModel.shareLogsIntent()
-                if (intent != null) context.startActivity(intent)
-            }) {
+        SettingsCard("ОТЛАДКА", modifier = Modifier.padding(top = 16.dp)) {
+            NavRow(
+                icon = Icons.Filled.Terminal,
+                title = "Логи туннеля",
+                subtitle = "Просмотр логов как в консоли",
+                onClick = onOpenLogs,
+            )
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            Button(
+                onClick = {
+                    val intent = viewModel.shareLogsIntent()
+                    if (intent != null) context.startActivity(intent)
+                },
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
                 Text("Поделиться логами")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LogViewerScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var logs by remember { mutableStateOf("") }
+    var reloadKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(reloadKey) {
+        logs = withContext(Dispatchers.IO) { viewModel.readLogs() }
+    }
+
+    val scrollState = rememberScrollState()
+    // Jump to the newest lines whenever the content changes (console tail behaviour).
+    LaunchedEffect(logs) { scrollState.scrollTo(scrollState.maxValue) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Логи туннеля") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, contentDescription = "Назад") }
+                },
+                actions = {
+                    IconButton(onClick = { reloadKey++ }) { Icon(Icons.Filled.Refresh, contentDescription = "Обновить") }
+                    IconButton(onClick = { clipboard.setText(AnnotatedString(logs)) }) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = "Копировать")
+                    }
+                    IconButton(onClick = {
+                        val intent = viewModel.shareLogsIntent()
+                        if (intent != null) context.startActivity(intent)
+                    }) { Icon(Icons.Filled.Share, contentDescription = "Экспорт") }
+                    IconButton(onClick = { viewModel.clearLogs(); reloadKey++ }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Очистить", tint = MaterialTheme.colorScheme.error)
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .background(Color(0xFF0B0F14)),
+        ) {
+            if (logs.isBlank()) {
+                Text(
+                    "Логи пусты. Подключитесь, чтобы началась запись.",
+                    color = Color(0xFF8A94A6),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                )
+            } else {
+                Text(
+                    logs,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(12.dp),
+                    color = Color(0xFFB9C2D0),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    softWrap = false,
+                )
             }
         }
     }
@@ -548,6 +653,39 @@ private fun HintText(text: String) {
         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         modifier = Modifier.padding(top = 8.dp),
     )
+}
+
+/** A label + monospace value with a copy-to-clipboard button (proxy address/login/password). */
+@Composable
+private fun CopyRow(label: String, value: String) {
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.width(72.dp),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = { clipboard.setText(AnnotatedString(value)) }, modifier = Modifier.size(32.dp)) {
+            Icon(
+                Icons.Filled.ContentCopy,
+                contentDescription = "Копировать $label",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
 }
 
 @Composable

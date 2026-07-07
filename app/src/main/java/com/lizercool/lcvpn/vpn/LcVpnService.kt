@@ -58,6 +58,7 @@ class LcVpnService : VpnService() {
                 disconnect()
                 return START_NOT_STICKY
             }
+            ACTION_RECONNECT -> reconnect()
             else -> connect()
         }
         return START_STICKY
@@ -174,6 +175,28 @@ class LcVpnService : VpnService() {
                 }
             }
             isStarting.set(false)
+        }
+    }
+
+    /**
+     * Live server switch: tear down the current core + tun2socks (without stopping the service or
+     * dropping the foreground notification) and immediately reconnect, which re-reads the now
+     * newly-selected server from the DB. Used when the user picks another server while connected.
+     */
+    private fun reconnect() {
+        killSwitchRetryJob?.cancel()
+        killSwitchRetryJob = null
+        notificationTickerJob?.cancel()
+        notificationTickerJob = null
+        state.value = ConnectionState.Connecting
+        startForeground(NOTIFICATION_ID, buildConnectingNotification())
+        scope.launch {
+            stopTun2Socks()
+            runCatching { engine.stop() }
+            // The tun fd is intentionally left open here - establishTun() atomically replaces it
+            // on the next connect(), so device traffic is never briefly un-tunnelled mid-switch.
+            isStarting.set(false)
+            connect()
         }
     }
 
@@ -400,6 +423,7 @@ class LcVpnService : VpnService() {
     companion object {
         const val ACTION_CONNECT = "com.lizercool.lcvpn.CONNECT"
         const val ACTION_DISCONNECT = "com.lizercool.lcvpn.DISCONNECT"
+        const val ACTION_RECONNECT = "com.lizercool.lcvpn.RECONNECT"
         private const val CHANNEL_ID = "lcvpn_status"
         private const val NOTIFICATION_ID = 1
         private const val ERROR_NOTIFICATION_ID = 2
