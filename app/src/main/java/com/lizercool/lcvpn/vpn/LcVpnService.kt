@@ -108,10 +108,13 @@ class LcVpnService : VpnService() {
                 // fingerprint the server IP - the runetfreedom disclosure.
                 val socksUser = "lc"
                 val socksPass = randomToken(16)
+                val routingOptions = prefs.routingOptions.first()
+                val antiDpiOptions = prefs.antiDpiOptions.first()
                 val configJson = ConfigBuilder.build(
                     server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
                     geoRouting = geoRouting, sniffing = sniffing, blockUdp = blockUdp,
                     socksUser = socksUser, socksPass = socksPass,
+                    routing = routingOptions, antiDpi = antiDpiOptions,
                 )
 
                 var tun: TunResult? = null
@@ -139,6 +142,7 @@ class LcVpnService : VpnService() {
                         server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
                         geoRouting = false, sniffing = sniffing, blockUdp = blockUdp,
                         socksUser = socksUser, socksPass = socksPass,
+                        routing = routingOptions, antiDpi = antiDpiOptions,
                     )
                     started = engine.start(fallbackConfig, null)
                 }

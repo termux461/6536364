@@ -6,9 +6,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.lizercool.lcvpn.data.model.AntiDpiOptions
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.PingMode
+import com.lizercool.lcvpn.data.model.RoutingMode
+import com.lizercool.lcvpn.data.model.RoutingOptions
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 import kotlinx.coroutines.flow.Flow
@@ -40,6 +43,19 @@ class Prefs(private val context: Context) {
         val BLOCK_UDP = booleanPreferencesKey("block_udp")
         val KEEP_AWAKE = booleanPreferencesKey("keep_awake")
         val LOG_RETENTION_HOURS = intPreferencesKey("log_retention_hours") // 0 = forever
+
+        // Routing (Маршрутизация).
+        val ROUTING_MODE = stringPreferencesKey("routing_mode")
+        val DIRECT_DOMAINS = stringPreferencesKey("direct_domains")
+        val PROXY_DOMAINS = stringPreferencesKey("proxy_domains")
+
+        // Anti-DPI + Mux (Анти-DPI).
+        val FRAGMENT_ENABLED = booleanPreferencesKey("fragment_enabled")
+        val FRAGMENT_PACKETS = stringPreferencesKey("fragment_packets")
+        val FRAGMENT_LENGTH = stringPreferencesKey("fragment_length")
+        val FRAGMENT_INTERVAL = stringPreferencesKey("fragment_interval")
+        val MUX_ENABLED = booleanPreferencesKey("mux_enabled")
+        val MUX_CONCURRENCY = intPreferencesKey("mux_concurrency")
     }
 
     val language: Flow<String> = context.dataStore.data.map { it[Keys.LANGUAGE] ?: "ru" }
@@ -72,6 +88,39 @@ class Prefs(private val context: Context) {
     val keepAwake: Flow<Boolean> = context.dataStore.data.map { it[Keys.KEEP_AWAKE] ?: false }
     val logRetentionHours: Flow<Int> = context.dataStore.data.map { it[Keys.LOG_RETENTION_HOURS] ?: 1 }
 
+    val routingMode: Flow<RoutingMode> = context.dataStore.data.map {
+        runCatching { RoutingMode.valueOf(it[Keys.ROUTING_MODE] ?: "") }.getOrDefault(RoutingMode.SMART)
+    }
+    val directDomains: Flow<String> = context.dataStore.data.map { it[Keys.DIRECT_DOMAINS] ?: "" }
+    val proxyDomains: Flow<String> = context.dataStore.data.map { it[Keys.PROXY_DOMAINS] ?: "" }
+    val routingOptions: Flow<RoutingOptions> = context.dataStore.data.map { p ->
+        RoutingOptions(
+            mode = runCatching { RoutingMode.valueOf(p[Keys.ROUTING_MODE] ?: "") }.getOrDefault(RoutingMode.SMART),
+            directDomains = splitDomains(p[Keys.DIRECT_DOMAINS]),
+            proxyDomains = splitDomains(p[Keys.PROXY_DOMAINS]),
+        )
+    }
+
+    val fragmentEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.FRAGMENT_ENABLED] ?: false }
+    val fragmentPackets: Flow<String> = context.dataStore.data.map { it[Keys.FRAGMENT_PACKETS] ?: "tlshello" }
+    val fragmentLength: Flow<String> = context.dataStore.data.map { it[Keys.FRAGMENT_LENGTH] ?: "100-200" }
+    val fragmentInterval: Flow<String> = context.dataStore.data.map { it[Keys.FRAGMENT_INTERVAL] ?: "10-20" }
+    val muxEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.MUX_ENABLED] ?: false }
+    val muxConcurrency: Flow<Int> = context.dataStore.data.map { it[Keys.MUX_CONCURRENCY] ?: 8 }
+    val antiDpiOptions: Flow<AntiDpiOptions> = context.dataStore.data.map { p ->
+        AntiDpiOptions(
+            fragmentEnabled = p[Keys.FRAGMENT_ENABLED] ?: false,
+            fragmentPackets = p[Keys.FRAGMENT_PACKETS] ?: "tlshello",
+            fragmentLength = p[Keys.FRAGMENT_LENGTH] ?: "100-200",
+            fragmentInterval = p[Keys.FRAGMENT_INTERVAL] ?: "10-20",
+            muxEnabled = p[Keys.MUX_ENABLED] ?: false,
+            muxConcurrency = p[Keys.MUX_CONCURRENCY] ?: 8,
+        )
+    }
+
+    private fun splitDomains(raw: String?): List<String> =
+        raw?.split(',', '\n', ' ')?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+
     suspend fun setLanguage(value: String) = context.dataStore.edit { it[Keys.LANGUAGE] = value }
     suspend fun setDarkTheme(value: Boolean) = context.dataStore.edit { it[Keys.DARK_THEME] = value }
     suspend fun setSortOrder(value: ServerListSort) = context.dataStore.edit { it[Keys.SORT_ORDER] = value.name }
@@ -88,6 +137,15 @@ class Prefs(private val context: Context) {
     suspend fun setBlockUdp(value: Boolean) = context.dataStore.edit { it[Keys.BLOCK_UDP] = value }
     suspend fun setKeepAwake(value: Boolean) = context.dataStore.edit { it[Keys.KEEP_AWAKE] = value }
     suspend fun setLogRetentionHours(value: Int) = context.dataStore.edit { it[Keys.LOG_RETENTION_HOURS] = value }
+    suspend fun setRoutingMode(value: RoutingMode) = context.dataStore.edit { it[Keys.ROUTING_MODE] = value.name }
+    suspend fun setDirectDomains(value: String) = context.dataStore.edit { it[Keys.DIRECT_DOMAINS] = value }
+    suspend fun setProxyDomains(value: String) = context.dataStore.edit { it[Keys.PROXY_DOMAINS] = value }
+    suspend fun setFragmentEnabled(value: Boolean) = context.dataStore.edit { it[Keys.FRAGMENT_ENABLED] = value }
+    suspend fun setFragmentPackets(value: String) = context.dataStore.edit { it[Keys.FRAGMENT_PACKETS] = value }
+    suspend fun setFragmentLength(value: String) = context.dataStore.edit { it[Keys.FRAGMENT_LENGTH] = value }
+    suspend fun setFragmentInterval(value: String) = context.dataStore.edit { it[Keys.FRAGMENT_INTERVAL] = value }
+    suspend fun setMuxEnabled(value: Boolean) = context.dataStore.edit { it[Keys.MUX_ENABLED] = value }
+    suspend fun setMuxConcurrency(value: Int) = context.dataStore.edit { it[Keys.MUX_CONCURRENCY] = value }
 
     suspend fun hasSeenAnnouncement(version: String): Boolean {
         val seen = context.dataStore.data.map { it[Keys.ANNOUNCEMENT_SEEN_VERSION] }.first()

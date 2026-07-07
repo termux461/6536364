@@ -1,11 +1,15 @@
 package com.lizercool.lcvpn.vpn
 
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
+import com.lizercool.lcvpn.data.model.AntiDpiOptions
 import com.lizercool.lcvpn.data.model.ProxyProtocol
+import com.lizercool.lcvpn.data.model.RoutingMode
+import com.lizercool.lcvpn.data.model.RoutingOptions
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.util.GeoAssets
 import org.json.JSONArray
 import org.json.JSONObject
+import timber.log.Timber
 
 /**
  * Builds an Xray-core style JSON config for a given server profile. Kept separate from
@@ -40,23 +44,45 @@ object ConfigBuilder {
         // is handed the same creds so the real tunnel still works.
         socksUser: String? = null,
         socksPass: String? = null,
+        // Routing + anti-DPI/mux choices (Маршрутизация / Анти-DPI). Only applied to configs we
+        // build ourselves; panel-authored Автовыбор configs are used as authored.
+        routing: RoutingOptions = RoutingOptions(),
+        antiDpi: AntiDpiOptions = AntiDpiOptions(),
     ): String {
         // Panel-authored full configs (Автовыбор profiles) carry their own routing/balancers -
-        // geoRouting/minimalRouting/blockUdp don't apply, the config is used as authored (only
-        // our inbounds + sniffing preference are swapped in).
+        // geoRouting/minimalRouting/blockUdp/routing/antiDpi don't apply, the config is used as
+        // authored (only our inbounds + sniffing preference are swapped in).
         server.fullConfigJson?.let {
             return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass)
         }
         return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass) { root ->
             val outbounds = JSONArray()
-            outbounds.put(buildOutbound(server, "proxy"))
+            outbounds.put(buildOutbound(server, "proxy", antiDpi))
+            // A freedom outbound that fragments the TLS ClientHello to slip past DPI; the proxy
+            // outbound dials through it via sockopt.dialerProxy (see buildVlessOutbound).
+            if (antiDpi.fragmentEnabled) outbounds.put(buildFragmentOutbound(antiDpi))
             outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
             outbounds.put(JSONObject().put("tag", "block").put("protocol", "blackhole"))
             root.put("outbounds", outbounds)
 
-            root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting, blockUdp = blockUdp))
+            root.put("routing", buildRouting(geo = geoRouting, minimal = minimalRouting, blockUdp = blockUdp, routing = routing))
         }
     }
+
+    private fun buildFragmentOutbound(antiDpi: AntiDpiOptions): JSONObject =
+        JSONObject()
+            .put("tag", "fragment")
+            .put("protocol", "freedom")
+            .put(
+                "settings",
+                JSONObject().put(
+                    "fragment",
+                    JSONObject()
+                        .put("packets", antiDpi.fragmentPackets.ifBlank { "tlshello" })
+                        .put("length", antiDpi.fragmentLength.ifBlank { "100-200" })
+                        .put("interval", antiDpi.fragmentInterval.ifBlank { "10-20" }),
+                ),
+            )
 
     /**
      * Adapts a complete panel-authored client config (an Автовыбор profile with a leastLoad
@@ -98,7 +124,12 @@ object ConfigBuilder {
      * then send everything else through the proxy. Mirrors the routing template the Remnawave
      * panel itself ships in its own exported configs.
      */
-    private fun buildRouting(geo: Boolean, minimal: Boolean, blockUdp: Boolean = false): JSONObject {
+    private fun buildRouting(
+        geo: Boolean,
+        minimal: Boolean,
+        blockUdp: Boolean = false,
+        routing: RoutingOptions = RoutingOptions(),
+    ): JSONObject {
         // Latency probes: route everything straight through the proxy, nothing else. No geo, no
         // RU bypass - the whole point is to time a request that actually traverses the tunnel.
         if (minimal) {
@@ -108,6 +139,7 @@ object ConfigBuilder {
             return JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         }
 
+        val global = routing.mode == RoutingMode.GLOBAL
         // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
         // their .dat files, so those rules are only emitted when the caller confirmed the files
         // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
@@ -118,7 +150,17 @@ object ConfigBuilder {
         if (blockUdp) {
             rules.put(JSONObject().put("type", "field").put("network", "udp").put("outboundTag", "block"))
         }
-        if (geo) {
+        // User's explicit "always through VPN" domains win over everything below.
+        if (routing.proxyDomains.isNotEmpty()) {
+            rules.put(JSONObject().put("type", "field").put("domain", JSONArray(routing.proxyDomains.map { normalizeDomain(it) })).put("outboundTag", "proxy"))
+        }
+        // User's explicit "bypass" domains go direct.
+        if (routing.directDomains.isNotEmpty()) {
+            rules.put(JSONObject().put("type", "field").put("domain", JSONArray(routing.directDomains.map { normalizeDomain(it) })).put("outboundTag", "direct"))
+        }
+        // GLOBAL mode: no ad-block, no RU bypass - just LAN/private stays off-tunnel and the rest
+        // is proxied. SMART mode (default) keeps the panel-style RU-direct + ad-block behaviour.
+        if (!global && geo) {
             rules.put(
                 JSONObject()
                     .put("type", "field")
@@ -127,21 +169,24 @@ object ConfigBuilder {
             )
         }
         val directDomains = JSONArray()
-        if (geo) {
+        if (!global && geo) {
             directDomains.put("geosite:private")
             directDomains.put("geosite:category-ru")
         }
-        directDomains.put("regexp:.*\\.ru$")
-        directDomains.put("regexp:.*\\.su$")
-        directDomains.put("regexp:.*\\.рф$")
-        rules.put(JSONObject().put("type", "field").put("domain", directDomains).put("outboundTag", "direct"))
+        if (!global) {
+            directDomains.put("regexp:.*\\.ru$")
+            directDomains.put("regexp:.*\\.su$")
+            directDomains.put("regexp:.*\\.рф$")
+        }
+        if (directDomains.length() > 0) {
+            rules.put(JSONObject().put("type", "field").put("domain", directDomains).put("outboundTag", "direct"))
+        }
+        // Private/LAN IPs always go direct (even in GLOBAL) so localhost and the local network
+        // aren't pointlessly tunnelled; RU geoip only in SMART.
+        val directIps = JSONArray().put("geoip:private")
+        if (!global && geo) directIps.put("geoip:ru")
         if (geo) {
-            rules.put(
-                JSONObject()
-                    .put("type", "field")
-                    .put("ip", JSONArray().put("geoip:ru").put("geoip:private"))
-                    .put("outboundTag", "direct"),
-            )
+            rules.put(JSONObject().put("type", "field").put("ip", directIps).put("outboundTag", "direct"))
         }
         rules.put(JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"))
 
@@ -149,6 +194,14 @@ object ConfigBuilder {
             .put("domainStrategy", "IPIfNonMatch")
             .put("domainMatcher", "hybrid")
             .put("rules", rules)
+    }
+
+    /** Bare domains get Xray's "domain:" matcher; entries with a matcher prefix are left as-is. */
+    private fun normalizeDomain(raw: String): String {
+        val d = raw.trim()
+        val hasPrefix = d.startsWith("domain:") || d.startsWith("full:") || d.startsWith("regexp:") ||
+            d.startsWith("geosite:") || d.startsWith("keyword:")
+        return if (hasPrefix) d else "domain:$d"
     }
 
     private inline fun buildRoot(
@@ -250,14 +303,14 @@ object ConfigBuilder {
         return inbounds
     }
 
-    private fun buildOutbound(server: ServerEntity, tag: String): JSONObject {
+    private fun buildOutbound(server: ServerEntity, tag: String, antiDpi: AntiDpiOptions = AntiDpiOptions()): JSONObject {
         return when (server.protocol) {
             ProxyProtocol.HYSTERIA2 -> buildHysteria2Outbound(server, tag)
-            else -> buildVlessOutbound(server, tag)
+            else -> buildVlessOutbound(server, tag, antiDpi)
         }
     }
 
-    private fun buildVlessOutbound(server: ServerEntity, tag: String): JSONObject {
+    private fun buildVlessOutbound(server: ServerEntity, tag: String, antiDpi: AntiDpiOptions): JSONObject {
         val user = JSONObject()
             .put("id", server.uuid)
             .put("encryption", "none")
@@ -301,18 +354,41 @@ object ConfigBuilder {
                     .put("path", server.wsPath ?: "/")
                     .put("host", server.wsHost ?: server.sni ?: server.address)
                     .put("mode", server.xhttpMode ?: "auto")
+                // "extra" carries the panel's advanced xhttp knobs (xmux, downloadSettings,
+                // headers, ...) as a nested JSON object, exactly as Xray-core expects it.
                 server.xhttpExtraJson?.let { extra ->
-                    runCatching { JSONObject(extra) }.onSuccess { xhttpSettings.put("extra", it) }
+                    runCatching { JSONObject(extra) }
+                        .onSuccess { xhttpSettings.put("extra", it) }
+                        .onFailure { Timber.w(it, "Bad xhttp 'extra' JSON for %s, ignoring", server.name) }
                 }
                 streamSettings.put("xhttpSettings", xhttpSettings)
             }
         }
 
-        return JSONObject()
+        // Anti-DPI: dial the proxy through the fragment outbound so its TLS ClientHello is split.
+        if (antiDpi.fragmentEnabled) {
+            streamSettings.put("sockopt", JSONObject().put("dialerProxy", "fragment"))
+        }
+
+        val outbound = JSONObject()
             .put("tag", tag)
             .put("protocol", "vless")
             .put("settings", settings)
             .put("streamSettings", streamSettings)
+
+        // Mux multiplexes many streams over one connection - fewer handshakes, but can hurt
+        // throughput; opt-in. XUDP is what carries UDP (QUIC etc.) over the mux link.
+        if (antiDpi.muxEnabled) {
+            outbound.put(
+                "mux",
+                JSONObject()
+                    .put("enabled", true)
+                    .put("concurrency", antiDpi.muxConcurrency.coerceIn(1, 128))
+                    .put("xudpConcurrency", 8)
+                    .put("xudpProxyUDP443", "reject"),
+            )
+        }
+        return outbound
     }
 
     private fun buildHysteria2Outbound(server: ServerEntity, tag: String): JSONObject {

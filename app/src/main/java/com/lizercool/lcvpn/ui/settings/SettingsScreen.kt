@@ -75,6 +75,7 @@ import com.lizercool.lcvpn.BuildConfig
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.PingMode
+import com.lizercool.lcvpn.data.model.RoutingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 
@@ -119,8 +120,8 @@ fun SettingsScreen(viewModel: SettingsViewModel = viewModel()) {
                     onOpenAppRouting = { showAppRouting = true },
                     onOpenAdvanced = { showAdvanced = true },
                 )
-                2 -> RoutingTab()
-                3 -> AntiDpiTab()
+                2 -> RoutingTab(viewModel)
+                3 -> AntiDpiTab(viewModel)
                 4 -> AboutTab(viewModel, onOpenLogs = { showLogs = true })
             }
         }
@@ -497,28 +498,130 @@ private fun StepperRow(title: String, subtitle: String, value: Int, step: Int, r
 }
 
 @Composable
-private fun RoutingTab() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        SettingsCard("ПРАВИЛА МАРШРУТИЗАЦИИ") {
-            Text(
-                "Домены и приложения, которые должны идти в обход VPN, настраиваются здесь. " +
-                    "Эта часть UI - следующий шаг после того как заработает базовое подключение.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+private fun RoutingTab(viewModel: SettingsViewModel) {
+    val routingMode by viewModel.routingMode.collectAsState()
+    val directDomains by viewModel.directDomains.collectAsState()
+    val proxyDomains by viewModel.proxyDomains.collectAsState()
+
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            SettingsCard("РЕЖИМ") {
+                SegmentedRow(
+                    options = listOf(
+                        RoutingMode.SMART to "Умный",
+                        RoutingMode.GLOBAL to "Всё через VPN",
+                    ),
+                    selected = routingMode,
+                    onSelect = viewModel::setRoutingMode,
+                )
+                HintText(
+                    when (routingMode) {
+                        RoutingMode.SMART -> "Российские сайты и локальная сеть идут напрямую, реклама блокируется, остальное — через VPN."
+                        RoutingMode.GLOBAL -> "Весь трафик идёт через VPN (кроме локальной сети). Без обхода РФ и блокировки рекламы."
+                    },
+                )
+            }
+        }
+        item {
+            SettingsCard("ДОМЕНЫ В ОБХОД (напрямую)") {
+                DomainField(
+                    value = directDomains,
+                    onChange = viewModel::setDirectDomains,
+                    placeholder = "example.com, mail.ru, *.gov.ru",
+                )
+                HintText("Через запятую или с новой строки. Эти домены пойдут мимо VPN.")
+            }
+        }
+        item {
+            SettingsCard("ДОМЕНЫ ЧЕРЕЗ VPN (принудительно)") {
+                DomainField(
+                    value = proxyDomains,
+                    onChange = viewModel::setProxyDomains,
+                    placeholder = "youtube.com, instagram.com",
+                )
+                HintText("Всегда идут через VPN, даже в «Умном» режиме и если попадают под обход РФ.")
+            }
         }
     }
 }
 
 @Composable
-private fun AntiDpiTab() {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        SettingsCard("АНТИ-DPI") {
-            Text(
-                "Настройки обфускации (фрагментация TLS ClientHello, паддинг пакетов и т.п.) " +
-                    "будут выведены сюда, когда основной движок подключения будет готов.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+private fun DomainField(value: String, onChange: (String) -> Unit, placeholder: String) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text(placeholder, style = MaterialTheme.typography.bodySmall) },
+        textStyle = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 2,
+        maxLines = 5,
+    )
+}
+
+@Composable
+private fun AntiDpiTab(viewModel: SettingsViewModel) {
+    val fragmentEnabled by viewModel.fragmentEnabled.collectAsState()
+    val fragmentPackets by viewModel.fragmentPackets.collectAsState()
+    val fragmentLength by viewModel.fragmentLength.collectAsState()
+    val fragmentInterval by viewModel.fragmentInterval.collectAsState()
+    val muxEnabled by viewModel.muxEnabled.collectAsState()
+    val muxConcurrency by viewModel.muxConcurrency.collectAsState()
+
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            SettingsCard("ФРАГМЕНТАЦИЯ") {
+                SwitchRow("Фрагментация TLS", fragmentEnabled, viewModel::setFragmentEnabled)
+                HintText(
+                    "Дробит TLS ClientHello на части, чтобы DPI не смог опознать и заблокировать " +
+                        "соединение. Помогает при активных блокировках. Не применяется к «Автовыбору».",
+                )
+                if (fragmentEnabled) {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    LabeledField("Пакеты", fragmentPackets, viewModel::setFragmentPackets, "tlshello")
+                    LabeledField("Длина", fragmentLength, viewModel::setFragmentLength, "100-200")
+                    LabeledField("Интервал (мс)", fragmentInterval, viewModel::setFragmentInterval, "10-20")
+                }
+            }
         }
+        item {
+            SettingsCard("МУЛЬТИПЛЕКСИРОВАНИЕ (MUX)") {
+                SwitchRow("Mux", muxEnabled, viewModel::setMuxEnabled)
+                HintText(
+                    "Объединяет несколько соединений в один канал — меньше рукопожатий, но может " +
+                        "снизить скорость. Обычно лучше держать выключенным.",
+                )
+                if (muxEnabled) {
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    StepperRow(
+                        title = "Concurrency",
+                        subtitle = "Число потоков в одном канале",
+                        value = muxConcurrency,
+                        step = 1,
+                        range = 1..128,
+                        onChange = viewModel::setMuxConcurrency,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** A left-aligned label with an inline single-line text field on the right (fragment params). */
+@Composable
+private fun LabeledField(label: String, value: String, onChange: (String) -> Unit, placeholder: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(110.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            placeholder = { Text(placeholder, style = MaterialTheme.typography.bodySmall) },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 

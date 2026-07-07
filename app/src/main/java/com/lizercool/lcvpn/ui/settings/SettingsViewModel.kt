@@ -8,6 +8,7 @@ import com.lizercool.lcvpn.data.db.entity.AppRoutingRuleEntity
 import com.lizercool.lcvpn.data.model.AppRoutingMode
 import com.lizercool.lcvpn.data.model.IpStackMode
 import com.lizercool.lcvpn.data.model.PingMode
+import com.lizercool.lcvpn.data.model.RoutingMode
 import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.data.model.TunnelMode
 import com.lizercool.lcvpn.util.LanAddress
@@ -44,6 +45,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val blockUdp: StateFlow<Boolean> = prefs.blockUdp.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val keepAwake: StateFlow<Boolean> = prefs.keepAwake.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val logRetentionHours: StateFlow<Int> = prefs.logRetentionHours.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1)
+    val routingMode: StateFlow<RoutingMode> = prefs.routingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RoutingMode.SMART)
+    val directDomains: StateFlow<String> = prefs.directDomains.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val proxyDomains: StateFlow<String> = prefs.proxyDomains.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val fragmentEnabled: StateFlow<Boolean> = prefs.fragmentEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val fragmentPackets: StateFlow<String> = prefs.fragmentPackets.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "tlshello")
+    val fragmentLength: StateFlow<String> = prefs.fragmentLength.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "100-200")
+    val fragmentInterval: StateFlow<String> = prefs.fragmentInterval.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "10-20")
+    val muxEnabled: StateFlow<Boolean> = prefs.muxEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val muxConcurrency: StateFlow<Int> = prefs.muxConcurrency.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 8)
 
     // Enumerating installed apps + loading each one's label is a real PackageManager cost (can
     // take a noticeable moment with 100+ apps installed) - loading it eagerly/synchronously on
@@ -87,6 +97,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBlockUdp(value: Boolean) = viewModelScope.launch { prefs.setBlockUdp(value) }
     fun setKeepAwake(value: Boolean) = viewModelScope.launch { prefs.setKeepAwake(value) }
     fun setLogRetentionHours(value: Int) = viewModelScope.launch { prefs.setLogRetentionHours(value) }
+    fun setRoutingMode(value: RoutingMode) = viewModelScope.launch { prefs.setRoutingMode(value) }
+    fun setDirectDomains(value: String) = viewModelScope.launch { prefs.setDirectDomains(value) }
+    fun setProxyDomains(value: String) = viewModelScope.launch { prefs.setProxyDomains(value) }
+    fun setFragmentEnabled(value: Boolean) = viewModelScope.launch { prefs.setFragmentEnabled(value) }
+    fun setFragmentPackets(value: String) = viewModelScope.launch { prefs.setFragmentPackets(value) }
+    fun setFragmentLength(value: String) = viewModelScope.launch { prefs.setFragmentLength(value) }
+    fun setFragmentInterval(value: String) = viewModelScope.launch { prefs.setFragmentInterval(value) }
+    fun setMuxEnabled(value: Boolean) = viewModelScope.launch { prefs.setMuxEnabled(value) }
+    fun setMuxConcurrency(value: Int) = viewModelScope.launch { prefs.setMuxConcurrency(value.coerceIn(1, 128)) }
 
     fun toggleAppSelected(packageName: String, selected: Boolean) {
         viewModelScope.launch {
