@@ -24,9 +24,11 @@ object HevSocks5Tunnel {
         tunIpv4Client: String,
         tunIpv6Client: String? = null,
         idleTimeoutSec: Int = 300,
+        socksUser: String? = null,
+        socksPass: String? = null,
     ) {
         val configFile = File(context.filesDir, "hev-socks5-tunnel.yaml").apply {
-            writeText(buildConfig(socksPort, mtu, tunIpv4Client, tunIpv6Client, idleTimeoutSec))
+            writeText(buildConfig(socksPort, mtu, tunIpv4Client, tunIpv6Client, idleTimeoutSec, socksUser, socksPass))
         }
         TProxyService.TProxyStartService(configFile.absolutePath, tunFd)
     }
@@ -41,6 +43,8 @@ object HevSocks5Tunnel {
         tunIpv4Client: String,
         tunIpv6Client: String?,
         idleTimeoutSec: Int,
+        socksUser: String?,
+        socksPass: String?,
     ): String = buildString {
         // hev takes the read/write timeouts in milliseconds; the setting is exposed to users in
         // seconds ("Таймаут простоя"). UDP flows are short-lived so they get a quarter of it.
@@ -55,6 +59,12 @@ object HevSocks5Tunnel {
         appendLine("socks5:")
         appendLine("  port: $socksPort")
         appendLine("  address: 127.0.0.1")
+        // Must match the auth on Xray's socks-in inbound (see ConfigBuilder) - the loopback proxy
+        // is password-guarded so a hostile localhost app can't use it to fingerprint the server.
+        if (!socksUser.isNullOrEmpty() && !socksPass.isNullOrEmpty()) {
+            appendLine("  username: '$socksUser'")
+            appendLine("  password: '$socksPass'")
+        }
         appendLine("  udp: 'udp'")
         appendLine("misc:")
         appendLine("  tcp-read-write-timeout: $tcpTimeoutMs")

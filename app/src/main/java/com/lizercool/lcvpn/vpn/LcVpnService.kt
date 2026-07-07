@@ -103,9 +103,15 @@ class LcVpnService : VpnService() {
                 val blockUdp = prefs.blockUdp.first()
                 val idleTimeoutSec = prefs.idleTimeoutSec.first()
                 if (prefs.keepAwake.first()) acquireWakeLock()
+                // Per-session random credentials guarding the loopback SOCKS inbound (see
+                // ConfigBuilder / HevSocks5Tunnel) so a hostile localhost app can't ride it to
+                // fingerprint the server IP - the runetfreedom disclosure.
+                val socksUser = "lc"
+                val socksPass = randomToken(16)
                 val configJson = ConfigBuilder.build(
                     server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
                     geoRouting = geoRouting, sniffing = sniffing, blockUdp = blockUdp,
+                    socksUser = socksUser, socksPass = socksPass,
                 )
 
                 var tun: TunResult? = null
@@ -132,6 +138,7 @@ class LcVpnService : VpnService() {
                     val fallbackConfig = ConfigBuilder.build(
                         server, tunnelMode, socksPort, LAN_PROXY_PORT, lanProxyPassword,
                         geoRouting = false, sniffing = sniffing, blockUdp = blockUdp,
+                        socksUser = socksUser, socksPass = socksPass,
                     )
                     started = engine.start(fallbackConfig, null)
                 }
@@ -139,7 +146,10 @@ class LcVpnService : VpnService() {
 
                 if (usesTun && tun != null) {
                     val v6 = if (tun.hasIpv6) TUN_ADDRESS_V6 else null
-                    HevSocks5Tunnel.start(this@LcVpnService, tun.fd, socksPort, TUN_MTU, TUN_ADDRESS, v6, idleTimeoutSec)
+                    HevSocks5Tunnel.start(
+                        this@LcVpnService, tun.fd, socksPort, TUN_MTU, TUN_ADDRESS, v6, idleTimeoutSec,
+                        socksUser, socksPass,
+                    )
                     tun2SocksRunning = true
                     Timber.i("hev-socks5-tunnel bridging tun fd %d to 127.0.0.1:%d", tun.fd, socksPort)
                 }
@@ -202,6 +212,12 @@ class LcVpnService : VpnService() {
 
     private fun findFreeLoopbackPort(): Int =
         java.net.ServerSocket(0, 1, java.net.InetAddress.getByName("127.0.0.1")).use { it.localPort }
+
+    private fun randomToken(length: Int): String {
+        val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        val rnd = java.security.SecureRandom()
+        return buildString { repeat(length) { append(alphabet[rnd.nextInt(alphabet.length)]) } }
+    }
 
     /** Optional partial wakelock - keeps the tunnel alive under aggressive OEM dozing (Xiaomi/HyperOS). */
     private fun acquireWakeLock() {

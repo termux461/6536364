@@ -33,14 +33,21 @@ object ConfigBuilder {
         // Advanced tuning (Расширенные настройки).
         sniffing: Boolean = true,
         blockUdp: Boolean = false,
+        // Optional username/password guarding the internal 127.0.0.1 SOCKS inbound. Without it a
+        // malicious app on the same device can connect to that loopback port directly (bypassing
+        // the Android VPN service / per-app split-tunnel / Knox-Shelter-Island isolation) and use
+        // it to discover the VPN server's real IP - the runetfreedom disclosure. hev-socks5-tunnel
+        // is handed the same creds so the real tunnel still works.
+        socksUser: String? = null,
+        socksPass: String? = null,
     ): String {
         // Panel-authored full configs (Автовыбор profiles) carry their own routing/balancers -
         // geoRouting/minimalRouting/blockUdp don't apply, the config is used as authored (only
         // our inbounds + sniffing preference are swapped in).
         server.fullConfigJson?.let {
-            return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing)
+            return buildFromFullConfig(it, tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass)
         }
-        return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing) { root ->
+        return buildRoot(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass) { root ->
             val outbounds = JSONArray()
             outbounds.put(buildOutbound(server, "proxy"))
             outbounds.put(JSONObject().put("tag", "direct").put("protocol", "freedom"))
@@ -65,11 +72,13 @@ object ConfigBuilder {
         lanProxyPort: Int,
         lanProxyPassword: String?,
         sniffing: Boolean,
+        socksUser: String?,
+        socksPass: String?,
     ): String {
         val root = JSONObject(configJson)
         // The panel template's log block may point at file paths that don't exist on Android.
         root.put("log", JSONObject().put("loglevel", "warning"))
-        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing))
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass))
 
         // Traffic counters for the speed/usage UI (harmless if the config already has them).
         if (!root.has("stats")) root.put("stats", JSONObject())
@@ -148,6 +157,8 @@ object ConfigBuilder {
         lanProxyPort: Int,
         lanProxyPassword: String?,
         sniffing: Boolean,
+        socksUser: String?,
+        socksPass: String?,
         putOutboundsAndRouting: (JSONObject) -> Unit,
     ): String {
         val root = JSONObject()
@@ -159,7 +170,7 @@ object ConfigBuilder {
                 .put("queryStrategy", "UseIP"),
         )
 
-        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing))
+        root.put("inbounds", buildInbounds(tunnelMode, socksPort, lanProxyPort, lanProxyPassword, sniffing, socksUser, socksPass))
 
         putOutboundsAndRouting(root)
 
@@ -184,6 +195,8 @@ object ConfigBuilder {
         lanProxyPort: Int,
         lanProxyPassword: String?,
         sniffingEnabled: Boolean,
+        socksUser: String?,
+        socksPass: String?,
     ): JSONArray {
         // Sniffing recovers the destination domain from TLS/HTTP/QUIC handshakes - without it a
         // SOCKS inbound only ever sees bare IPs, so every domain-based routing rule (geosite
@@ -193,6 +206,15 @@ object ConfigBuilder {
             .put("enabled", sniffingEnabled)
             .put("destOverride", JSONArray().put("http").put("tls").put("quic"))
 
+        // Password-guard the loopback SOCKS inbound when creds were supplied (the real tunnel),
+        // so a hostile localhost app can't ride it to fingerprint the VPN server's IP.
+        val socksInSettings = JSONObject().put("udp", true)
+        if (!socksUser.isNullOrEmpty() && !socksPass.isNullOrEmpty()) {
+            socksInSettings
+                .put("auth", "password")
+                .put("accounts", JSONArray().put(JSONObject().put("user", socksUser).put("pass", socksPass)))
+        }
+
         val inbounds = JSONArray()
         inbounds.put(
             JSONObject()
@@ -200,7 +222,7 @@ object ConfigBuilder {
                 .put("port", socksPort)
                 .put("listen", "127.0.0.1")
                 .put("protocol", "socks")
-                .put("settings", JSONObject().put("udp", true))
+                .put("settings", socksInSettings)
                 .put("sniffing", sniffing),
         )
         if (tunnelMode == TunnelMode.TUN_AND_PROXY && lanProxyPort > 0 && !lanProxyPassword.isNullOrEmpty()) {
