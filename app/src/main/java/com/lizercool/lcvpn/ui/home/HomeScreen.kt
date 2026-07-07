@@ -258,8 +258,8 @@ private fun MemoryReadout() {
     var mb by remember { mutableIntStateOf(com.lizercool.lcvpn.util.MemoryMonitor.usedMb()) }
     LaunchedEffect(Unit) {
         while (true) {
+            delay(3000)
             mb = com.lizercool.lcvpn.util.MemoryMonitor.usedMb()
-            delay(2000)
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {

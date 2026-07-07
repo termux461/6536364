@@ -14,7 +14,9 @@ import timber.log.Timber
 class LcVpnApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        Timber.plant(Timber.DebugTree())
+        // Verbose logcat only in debug builds; release keeps just the on-device file log (used by
+        // the in-app viewer / share-logs) - no logcat spam or info leakage in production.
+        if (BuildConfig.DEBUG) Timber.plant(Timber.DebugTree())
         Timber.plant(FileLogTree(this))
         Timber.i("LC VPN started, versionName=%s", BuildConfig.VERSION_NAME)
 

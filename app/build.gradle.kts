@@ -18,6 +18,15 @@ android {
         versionName = "1.0.0"
 
         vectorDrawables.useSupportLibrary = true
+
+        // Ship native libs only for real-phone ABIs. The prebuilt libv2ray.aar and the
+        // ndk-built libhev otherwise bundle x86/x86_64 too, which no shipping device uses -
+        // dropping them roughly halves the packaged native payload.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+        // Keep only the languages we actually ship; strips other locales pulled in by AndroidX.
+        resourceConfigurations += listOf("ru", "en")
     }
 
     buildTypes {
@@ -27,6 +36,7 @@ android {
         }
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("debug")
         }

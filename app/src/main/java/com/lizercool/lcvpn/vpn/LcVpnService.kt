@@ -53,6 +53,9 @@ class LcVpnService : VpnService() {
     private var tun2SocksRunning = false
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var currentTunnelMode: TunnelMode? = null
+    // Sampled every few seconds (Debug.getPss walks /proc/self/smaps and isn't free) so the
+    // notification and stats loop don't pay for it every tick.
+    @Volatile private var lastMemMb: Int = 0
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -321,14 +324,22 @@ class LcVpnService : VpnService() {
 
     private fun startNotificationTicker(serverName: String, connectedAt: Long) {
         notificationTickerJob?.cancel()
+        lastMemMb = MemoryMonitor.usedMb()
         notificationTickerJob = scope.launch {
             val manager = getSystemService(NotificationManager::class.java)
+            var tick = 0
             while (isActive) {
                 runCatching {
-                    val stats = engine.stats.value
-                    _stats.value = stats
-                    manager.notify(NOTIFICATION_ID, buildNotification(serverName, connectedAt, stats))
+                    // Mirror stats every second so the Home speed readout stays smooth (cheap
+                    // struct copy), sample RAM every 5s, and rebuild the heavier notification
+                    // every 2s - a good deal less CPU/battery than rebuilding everything each tick.
+                    _stats.value = engine.stats.value
+                    if (tick % 5 == 0) lastMemMb = MemoryMonitor.usedMb()
+                    if (tick % 2 == 0) {
+                        manager.notify(NOTIFICATION_ID, buildNotification(serverName, connectedAt, engine.stats.value))
+                    }
                 }.onFailure { Timber.w(it, "Failed to update connection notification") }
+                tick++
                 delay(1000)
             }
         }
@@ -423,14 +434,12 @@ class LcVpnService : VpnService() {
             TunnelMode.PROXY -> "Прокси"
             null -> "Подключено"
         }
-        val memMb = MemoryMonitor.usedMb()
-
         return baseNotificationBuilder()
             .setContentTitle(serverName)
             .setContentText(speedLine)
             .setSubText("$modeLabel · $elapsed")
             .setStyle(
-                NotificationCompat.BigTextStyle().bigText("$speedLine\n⏱ $elapsed   ▪ RAM $memMb МБ"),
+                NotificationCompat.BigTextStyle().bigText("$speedLine\n⏱ $elapsed   ▪ RAM $lastMemMb МБ"),
             )
             .addAction(disconnectAction())
             .build()
