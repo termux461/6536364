@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.lizercool.lcvpn.data.db.AppDatabase
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
+import com.lizercool.lcvpn.data.model.ServerListSort
 import com.lizercool.lcvpn.network.ping.PingTester
 import com.lizercool.lcvpn.util.Prefs
 import com.lizercool.lcvpn.vpn.ConnectionState
@@ -29,20 +30,32 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
     val servers: StateFlow<List<ServerEntity>> = db.serverDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val sortOrder: StateFlow<ServerListSort> =
+        prefs.sortOrder.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ServerListSort.NONE)
+
     /** Servers grouped under their subscription, in subscription order; ungrouped ones last. */
     val groups: StateFlow<List<ServerGroup>> =
-        combine(db.serverDao().observeAll(), db.subscriptionDao().observeAll()) { servers, subs ->
+        combine(db.serverDao().observeAll(), db.subscriptionDao().observeAll(), prefs.sortOrder) { servers, subs, sort ->
             val bySub = servers.groupBy { it.subscriptionId }
             val result = mutableListOf<ServerGroup>()
             subs.forEach { sub ->
                 val list = bySub[sub.id].orEmpty()
-                if (list.isNotEmpty()) result += ServerGroup(sub.name, list)
+                if (list.isNotEmpty()) result += ServerGroup(sub.name, sortServers(list, sort))
             }
             // Servers whose subscription is missing/null go into a trailing catch-all group.
             val orphaned = servers.filter { s -> subs.none { it.id == s.subscriptionId } }
-            if (orphaned.isNotEmpty()) result += ServerGroup("Прочие", orphaned)
+            if (orphaned.isNotEmpty()) result += ServerGroup("Прочие", sortServers(orphaned, sort))
             result
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun sortServers(list: List<ServerEntity>, sort: ServerListSort): List<ServerEntity> = when (sort) {
+        ServerListSort.NONE -> list
+        // Unreachable/not-yet-pinged servers sink to the bottom instead of jumping to the top.
+        ServerListSort.PING -> list.sortedBy { it.lastPingMs ?: Int.MAX_VALUE }
+        ServerListSort.ALPHABETICAL -> list.sortedBy { it.name.lowercase() }
+    }
+
+    fun setSortOrder(value: ServerListSort) = viewModelScope.launch { prefs.setSortOrder(value) }
 
     private val _isPinging = MutableStateFlow(false)
     val isPinging: StateFlow<Boolean> = _isPinging

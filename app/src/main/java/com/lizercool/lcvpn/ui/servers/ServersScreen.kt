@@ -14,13 +14,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +48,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
+import com.lizercool.lcvpn.data.model.ServerListSort
 
 private val PingGreen = Color(0xFF22C55E)
 private val PingAmber = Color(0xFFF59E0B)
@@ -54,7 +60,9 @@ fun ServersScreen(viewModel: ServersViewModel = viewModel()) {
     val servers by viewModel.servers.collectAsState()
     val groups by viewModel.groups.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     var query by remember { mutableStateOf("") }
+    var sortMenuOpen by remember { mutableStateOf(false) }
 
     // Filter within each group by the search query; drop groups that end up empty.
     val filteredGroups = groups
@@ -67,6 +75,16 @@ fun ServersScreen(viewModel: ServersViewModel = viewModel()) {
             TopAppBar(
                 title = { Text("Серверы · ${servers.size}") },
                 actions = {
+                    Box {
+                        IconButton(onClick = { sortMenuOpen = true }) {
+                            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Сортировка")
+                        }
+                        DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                            SortMenuItem("Без сортировки", ServerListSort.NONE, sortOrder) { viewModel.setSortOrder(it); sortMenuOpen = false }
+                            SortMenuItem("По пингу", ServerListSort.PING, sortOrder) { viewModel.setSortOrder(it); sortMenuOpen = false }
+                            SortMenuItem("По алфавиту", ServerListSort.ALPHABETICAL, sortOrder) { viewModel.setSortOrder(it); sortMenuOpen = false }
+                        }
+                    }
                     IconButton(onClick = { viewModel.refreshPings() }, enabled = !isPinging) {
                         if (isPinging) {
                             CircularProgressIndicator(modifier = Modifier.padding(8.dp).size(20.dp), strokeWidth = 2.dp)
@@ -104,6 +122,17 @@ fun ServersScreen(viewModel: ServersViewModel = viewModel()) {
             }
         }
     }
+}
+
+@Composable
+private fun SortMenuItem(label: String, value: ServerListSort, selected: ServerListSort, onClick: (ServerListSort) -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = { onClick(value) },
+        trailingIcon = {
+            if (value == selected) Icon(Icons.Filled.Check, contentDescription = null, tint = PingGreen)
+        },
+    )
 }
 
 @Composable

@@ -25,14 +25,17 @@ class LcVpnApp : Application() {
             runCatching { FileLogTree.pruneOldLogs(this@LcVpnApp, Prefs(this@LcVpnApp).logRetentionHours.first()) }
         }
 
-        // Cap / tune the Go (Xray-core) runtime's memory BEFORE the native lib loads. GODEBUG
-        // madvdontneed=1 makes Go hand freed pages back to the OS promptly (much lower reported
-        // RSS on Android); GOMEMLIMIT sets a soft cap the GC targets. Both are read from the
-        // process env at Go runtime init, so this has to run before any libv2ray call.
+        // Cap / tune the Go (Xray-core) runtime's memory BEFORE the native lib loads. Read from
+        // the process env at Go runtime init, so this must run before any libv2ray call.
+        //  - GODEBUG=madvdontneed=1: hand freed pages back to the OS promptly (much lower RSS).
+        //  - GOGC=40: collect sooner (target 40% heap growth instead of 100%) - trades a little
+        //    CPU for a noticeably smaller peak, which is what we want on a phone.
+        //  - GOMEMLIMIT: soft cap the GC aims to stay under.
         runCatching {
             val prefs = Prefs(this)
             val unlimited = kotlinx.coroutines.runBlocking { prefs.memoryUnlimitedOnce() }
             android.system.Os.setenv("GODEBUG", "madvdontneed=1", true)
+            android.system.Os.setenv("GOGC", if (unlimited) "80" else "40", true)
             if (!unlimited) {
                 val mb = kotlinx.coroutines.runBlocking { prefs.memoryLimitMbOnce() }
                 android.system.Os.setenv("GOMEMLIMIT", "${mb}MiB", true)
