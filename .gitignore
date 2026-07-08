@@ -1,0 +1,16 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/app/build
+/app/release
+/app/libs/libv2ray.aar
+/app/src/main/jniLibs
+/app/src/main/assets/geoip.dat
+/app/src/main/assets/geosite.dat

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lizercool</string>
+
+    <string name="status_protected">ЗАЩИЩЕНО</string>
+    <string name="status_unprotected">НЕ ЗАЩИЩЕНО</string>
+    <string name="tap_to_connect">Нажмите, чтобы подключиться</string>
+    <string name="tap_to_disconnect">Нажмите, чтобы отключиться</string>
+
+    <string name="nav_home">Главная</string>
+    <string name="nav_servers">Серверы</string>
+    <string name="nav_subscriptions">Подписки</string>
+    <string name="nav_settings">Настройки</string>
+
+    <string name="settings_general">Общие</string>
+    <string name="settings_connection">Подключение</string>
+    <string name="settings_routing">Маршрутизация</string>
+    <string name="settings_anti_dpi">Анти-DPI</string>
+    <string name="settings_about">О прил.</string>
+
+    <string name="tunnel_mode_title">РЕЖИМ ТУННЕЛЯ</string>
+    <string name="tunnel_mode_proxy">Прокси</string>
+    <string name="tunnel_mode_tun">TUN (полный VPN)</string>
+
+    <string name="routing_all_except_selected">Все, кроме выбранных</string>
+    <string name="routing_only_selected">Только выбранные</string>
+
+    <string name="add_subscription">Добавить подписку</string>
+    <string name="reserve_subscription">Использовать как резервную</string>
+
+    <string name="share_logs">Поделиться логами</string>
+</resources>

@@ -1,0 +1,91 @@
+name: Android build
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Download prebuilt libv2ray.aar
+        # Building AndroidLibXrayLite from source via gomobile hits an unresolved upstream
+        # incompatibility (github.com/wlynxg/anet fails to link under every combination of Go
+        # version, target ABI, and NDK version tried). v2rayNG itself doesn't build it from
+        # source either - it downloads the prebuilt .aar that 2dust/AndroidLibXrayLite already
+        # publishes as a GitHub Release asset, so we do the same.
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "2dust/AndroidLibXrayLite"
+          latest: true
+          fileName: "libv2ray.aar"
+          out-file-path: "app/libs"
+
+      - name: Download geoip.dat / geosite.dat (routing rule data)
+        # Needed for "geosite:"/"geoip:" entries in ConfigBuilder's routing rules (ad-block,
+        # RU-domain/geoip direct routing) to resolve at all - same files v2rayNG and most other
+        # Xray-core clients ship. Bundled as APK assets; GeoAssets.extractTo() copies them to
+        # real on-disk storage at app startup before Libv2ray.initCoreEnv() runs, since
+        # Xray-core opens them as plain files and can't read straight out of the APK.
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "Loyalsoldier/v2ray-rules-dat"
+          latest: true
+          fileName: "geoip.dat"
+          out-file-path: "app/src/main/assets"
+
+      - name: Download geosite.dat
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: "Loyalsoldier/v2ray-rules-dat"
+          latest: true
+          fileName: "geosite.dat"
+          out-file-path: "app/src/main/assets"
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;26.1.10909125"
+          echo "NDK_DIR=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Build libhev-socks5-tunnel.so (tun2socks bridge for TUN mode)
+        # Plain C, built with ndk-build - none of the Go/gomobile toolchain drama from
+        # libv2ray.aar applies here. Same library v2rayNG uses (see its TProxyService.kt),
+        # bridging the VpnService tun fd to Xray-core's local SOCKS inbound.
+        run: |
+          git clone --quiet --recurse-submodules --depth=1 https://github.com/heiher/hev-socks5-tunnel.git /tmp/hev-socks5-tunnel
+          cd /tmp/hev-socks5-tunnel
+          "$NDK_DIR/ndk-build" \
+            NDK_PROJECT_PATH="$(pwd)" \
+            APP_BUILD_SCRIPT="$(pwd)/Android.mk" \
+            NDK_APPLICATION_MK="$(pwd)/Application.mk"
+          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs"
+          for abi_dir in libs/*/; do
+            abi="$(basename "$abi_dir")"
+            mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi"
+            cp "$abi_dir/libhev-socks5-tunnel.so" "$GITHUB_WORKSPACE/app/src/main/jniLibs/$abi/"
+          done
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Assemble debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: lc-vpn-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

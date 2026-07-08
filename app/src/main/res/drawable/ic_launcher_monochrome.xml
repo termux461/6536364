@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield outline -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,22 L82,33 V56 C82,73 70,85 54,91 C38,85 26,73 26,56 V33 Z M54,30 L34,38 V56 C34,69 42,78 54,83 C66,78 74,69 74,56 V38 Z" />
+    <!-- Power symbol: ring + stem -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M51,44 h6 v16 h-6 z" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M54,46 m-14,0 a14,14 0 1,0 28,0 a14,14 0 1,0 -28,0 M54,46 m-8,0 a8,8 0 1,1 16,0 a8,8 0 1,1 -16,0" />
+    <!-- notch cut in the ring so the stem reads as a power icon -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M46,40 h16 v10 h-16 z" />
+</vector>
