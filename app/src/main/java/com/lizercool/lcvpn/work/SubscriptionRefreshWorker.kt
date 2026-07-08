@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
 class SubscriptionRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val db = AppDatabase.get(applicationContext)
-        val repository = SubscriptionRepository(db.subscriptionDao(), db.serverDao())
+        val repository = SubscriptionRepository(db.subscriptionDao(), db.serverDao(), applicationContext)
         repository.refreshAll()
         return Result.success()
     }

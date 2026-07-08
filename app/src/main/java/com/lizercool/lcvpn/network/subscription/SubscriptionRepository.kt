@@ -1,9 +1,11 @@
 package com.lizercool.lcvpn.network.subscription
 
+import android.content.Context
 import com.lizercool.lcvpn.data.db.dao.ServerDao
 import com.lizercool.lcvpn.data.db.dao.SubscriptionDao
 import com.lizercool.lcvpn.data.db.entity.ServerEntity
 import com.lizercool.lcvpn.data.db.entity.SubscriptionEntity
+import com.lizercool.lcvpn.util.DeviceInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -17,11 +19,16 @@ const val RESERVE_FALLBACK_THRESHOLD = 2
 class SubscriptionRepository(
     private val subscriptionDao: SubscriptionDao,
     private val serverDao: ServerDao,
+    private val context: Context,
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
+
+    // Sent on every subscription request so the Remnawave panel can bind/limit this device (HWID).
+    private val hwidHeaders = DeviceInfo.subscriptionHeaders(context)
+    private val happUserAgent = DeviceInfo.happUserAgent(context)
 
     /** Refreshes every non-reserve subscription; if all of them fail twice in a row, activates the reserve. */
     suspend fun refreshAll() {
@@ -61,8 +68,8 @@ class SubscriptionRepository(
             // explicit /json route, so those are tried first; the plain share-link format stays
             // as the fallback that always works.
             val attempts = listOf(
-                FetchAttempt(subscription.url, "Happ/1.8.0", "application/json"),
-                FetchAttempt(subscription.url.trimEnd('/') + "/json", "Happ/1.8.0", "application/json"),
+                FetchAttempt(subscription.url, happUserAgent, "application/json"),
+                FetchAttempt(subscription.url.trimEnd('/') + "/json", happUserAgent, "application/json"),
                 FetchAttempt(subscription.url, "LizercoolVPN/1.0", "text/plain"),
             )
 
@@ -121,11 +128,12 @@ class SubscriptionRepository(
     }
 
     private fun fetchAndParse(attempt: FetchAttempt, subscriptionId: Long): Parsed {
-        val request = Request.Builder()
+        val builder = Request.Builder()
             .url(attempt.url)
             .header("User-Agent", attempt.userAgent)
             .header("Accept", attempt.accept)
-            .build()
+        hwidHeaders.forEach { (k, v) -> builder.header(k, v) }
+        val request = builder.build()
 
         return client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code} for ${attempt.url}")

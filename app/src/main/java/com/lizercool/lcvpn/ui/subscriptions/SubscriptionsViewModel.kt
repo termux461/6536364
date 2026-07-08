@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 class SubscriptionsViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.get(application)
-    private val repository = SubscriptionRepository(db.subscriptionDao(), db.serverDao())
+    private val repository = SubscriptionRepository(db.subscriptionDao(), db.serverDao(), application)
 
     val subscriptions: StateFlow<List<SubscriptionEntity>> = db.subscriptionDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())

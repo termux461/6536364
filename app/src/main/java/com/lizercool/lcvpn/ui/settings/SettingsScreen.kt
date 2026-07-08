@@ -675,6 +675,11 @@ private fun AboutTab(viewModel: SettingsViewModel, onOpenLogs: () -> Unit) {
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
         )
 
+        SettingsCard("УСТРОЙСТВО", modifier = Modifier.padding(top = 16.dp)) {
+            CopyRow(label = "HWID", value = com.lizercool.lcvpn.util.DeviceInfo.hwid(context))
+            HintText("Идентификатор устройства, который отправляется в панель (лимит устройств).")
+        }
+
         SettingsCard("ОТЛАДКА", modifier = Modifier.padding(top = 16.dp)) {
             NavRow(
                 icon = Icons.Filled.Terminal,
