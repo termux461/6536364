@@ -45,6 +45,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val blockUdp: StateFlow<Boolean> = prefs.blockUdp.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val keepAwake: StateFlow<Boolean> = prefs.keepAwake.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
     val logRetentionHours: StateFlow<Int> = prefs.logRetentionHours.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1)
+    val routingEnabled: StateFlow<Boolean> = prefs.routingEnabled.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
     val routingMode: StateFlow<RoutingMode> = prefs.routingMode.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), RoutingMode.SMART)
     val directDomains: StateFlow<String> = prefs.directDomains.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
     val proxyDomains: StateFlow<String> = prefs.proxyDomains.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
@@ -99,6 +100,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBlockUdp(value: Boolean) = viewModelScope.launch { prefs.setBlockUdp(value) }
     fun setKeepAwake(value: Boolean) = viewModelScope.launch { prefs.setKeepAwake(value) }
     fun setLogRetentionHours(value: Int) = viewModelScope.launch { prefs.setLogRetentionHours(value) }
+    fun setRoutingEnabled(value: Boolean) = viewModelScope.launch { prefs.setRoutingEnabled(value) }
     fun setRoutingMode(value: RoutingMode) = viewModelScope.launch { prefs.setRoutingMode(value) }
     fun setDirectDomains(value: String) = viewModelScope.launch { prefs.setDirectDomains(value) }
     fun setProxyDomains(value: String) = viewModelScope.launch { prefs.setProxyDomains(value) }

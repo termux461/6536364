@@ -9,8 +9,16 @@ package com.lizercool.lcvpn.data.model
  */
 enum class RoutingMode { SMART, GLOBAL }
 
-/** User routing choices (Настройки → Маршрутизация). */
+/**
+ * User routing choices (Настройки → Маршрутизация).
+ *
+ * [enabled] is the master switch for CLIENT-side routing. When false, our own configs just send
+ * everything through the proxy (only the local network stays direct) and the custom domain lists
+ * are ignored - but panel-authored Автовыбор configs still use their own SERVER-side routing,
+ * because that lives inside the config itself and we never override it.
+ */
 data class RoutingOptions(
+    val enabled: Boolean = true,
     val mode: RoutingMode = RoutingMode.SMART,
     val directDomains: List<String> = emptyList(),
     val proxyDomains: List<String> = emptyList(),

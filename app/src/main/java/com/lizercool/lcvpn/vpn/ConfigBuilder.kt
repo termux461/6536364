@@ -139,17 +139,28 @@ object ConfigBuilder {
             return JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
         }
 
-        val global = routing.mode == RoutingMode.GLOBAL
-        // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
-        // their .dat files, so those rules are only emitted when the caller confirmed the files
-        // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
-        // Every rule carries "type":"field" - Xray-core rejects routing rules without it.
         val rules = JSONArray()
         // Optional: drop all UDP (breaks QUIC/DoU/games/voice - some users want it to force
         // everything onto TCP-based tunnels). Placed first so it wins over the rules below.
         if (blockUdp) {
             rules.put(JSONObject().put("type", "field").put("network", "udp").put("outboundTag", "block"))
         }
+
+        // Client-side routing turned off: everything goes through the proxy, only the local
+        // network stays direct (so localhost/LAN aren't pointlessly tunnelled). No ad-block, no
+        // RU bypass, no custom domain lists. (Панель-authored Автовыбор configs are unaffected -
+        // they carry their own server-side routing and never reach this builder.)
+        if (!routing.enabled) {
+            if (geo) rules.put(JSONObject().put("type", "field").put("ip", JSONArray().put("geoip:private")).put("outboundTag", "direct"))
+            rules.put(JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"))
+            return JSONObject().put("domainStrategy", "AsIs").put("rules", rules)
+        }
+
+        val global = routing.mode == RoutingMode.GLOBAL
+        // Xray-core refuses to start on a config whose "geosite:"/"geoip:" rules can't resolve
+        // their .dat files, so those rules are only emitted when the caller confirmed the files
+        // are on disk - otherwise routing degrades to regexp-only RU bypass + proxy-everything.
+        // Every rule carries "type":"field" - Xray-core rejects routing rules without it.
         // User's explicit "always through VPN" domains win over everything below.
         if (routing.proxyDomains.isNotEmpty()) {
             rules.put(JSONObject().put("type", "field").put("domain", JSONArray(routing.proxyDomains.map { normalizeDomain(it) })).put("outboundTag", "proxy"))

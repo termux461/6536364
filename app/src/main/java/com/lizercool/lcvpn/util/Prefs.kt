@@ -45,6 +45,7 @@ class Prefs(private val context: Context) {
         val LOG_RETENTION_HOURS = intPreferencesKey("log_retention_hours") // 0 = forever
 
         // Routing (Маршрутизация).
+        val ROUTING_ENABLED = booleanPreferencesKey("routing_enabled")
         val ROUTING_MODE = stringPreferencesKey("routing_mode")
         val DIRECT_DOMAINS = stringPreferencesKey("direct_domains")
         val PROXY_DOMAINS = stringPreferencesKey("proxy_domains")
@@ -91,6 +92,7 @@ class Prefs(private val context: Context) {
     val keepAwake: Flow<Boolean> = context.dataStore.data.map { it[Keys.KEEP_AWAKE] ?: false }
     val logRetentionHours: Flow<Int> = context.dataStore.data.map { it[Keys.LOG_RETENTION_HOURS] ?: 1 }
 
+    val routingEnabled: Flow<Boolean> = context.dataStore.data.map { it[Keys.ROUTING_ENABLED] ?: true }
     val routingMode: Flow<RoutingMode> = context.dataStore.data.map {
         runCatching { RoutingMode.valueOf(it[Keys.ROUTING_MODE] ?: "") }.getOrDefault(RoutingMode.SMART)
     }
@@ -98,6 +100,7 @@ class Prefs(private val context: Context) {
     val proxyDomains: Flow<String> = context.dataStore.data.map { it[Keys.PROXY_DOMAINS] ?: "" }
     val routingOptions: Flow<RoutingOptions> = context.dataStore.data.map { p ->
         RoutingOptions(
+            enabled = p[Keys.ROUTING_ENABLED] ?: true,
             mode = runCatching { RoutingMode.valueOf(p[Keys.ROUTING_MODE] ?: "") }.getOrDefault(RoutingMode.SMART),
             directDomains = splitDomains(p[Keys.DIRECT_DOMAINS]),
             proxyDomains = splitDomains(p[Keys.PROXY_DOMAINS]),
@@ -147,6 +150,7 @@ class Prefs(private val context: Context) {
     suspend fun setBlockUdp(value: Boolean) = context.dataStore.edit { it[Keys.BLOCK_UDP] = value }
     suspend fun setKeepAwake(value: Boolean) = context.dataStore.edit { it[Keys.KEEP_AWAKE] = value }
     suspend fun setLogRetentionHours(value: Int) = context.dataStore.edit { it[Keys.LOG_RETENTION_HOURS] = value }
+    suspend fun setRoutingEnabled(value: Boolean) = context.dataStore.edit { it[Keys.ROUTING_ENABLED] = value }
     suspend fun setRoutingMode(value: RoutingMode) = context.dataStore.edit { it[Keys.ROUTING_MODE] = value.name }
     suspend fun setDirectDomains(value: String) = context.dataStore.edit { it[Keys.DIRECT_DOMAINS] = value }
     suspend fun setProxyDomains(value: String) = context.dataStore.edit { it[Keys.PROXY_DOMAINS] = value }

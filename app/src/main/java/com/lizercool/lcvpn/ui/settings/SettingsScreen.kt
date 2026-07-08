@@ -522,47 +522,63 @@ private fun StepperRow(title: String, subtitle: String, value: Int, step: Int, r
 
 @Composable
 private fun RoutingTab(viewModel: SettingsViewModel) {
+    val routingEnabled by viewModel.routingEnabled.collectAsState()
     val routingMode by viewModel.routingMode.collectAsState()
     val directDomains by viewModel.directDomains.collectAsState()
     val proxyDomains by viewModel.proxyDomains.collectAsState()
 
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            SettingsCard("РЕЖИМ") {
-                SegmentedRow(
-                    options = listOf(
-                        RoutingMode.SMART to "Умный",
-                        RoutingMode.GLOBAL to "Всё через VPN",
-                    ),
-                    selected = routingMode,
-                    onSelect = viewModel::setRoutingMode,
-                )
+            SettingsCard("МАРШРУТИЗАЦИЯ") {
+                SwitchRow("Свои правила маршрутизации", routingEnabled, viewModel::setRoutingEnabled)
                 HintText(
-                    when (routingMode) {
-                        RoutingMode.SMART -> "Российские сайты и локальная сеть идут напрямую, реклама блокируется, остальное — через VPN."
-                        RoutingMode.GLOBAL -> "Весь трафик идёт через VPN (кроме локальной сети). Без обхода РФ и блокировки рекламы."
+                    if (routingEnabled) {
+                        "Включено: работают режим и списки доменов ниже."
+                    } else {
+                        "Выключено: весь трафик идёт через VPN (кроме локальной сети), списки доменов " +
+                            "не применяются. Серверная маршрутизация «Автовыбора» продолжает работать."
                     },
                 )
             }
         }
-        item {
-            SettingsCard("ДОМЕНЫ В ОБХОД (напрямую)") {
-                DomainField(
-                    value = directDomains,
-                    onChange = viewModel::setDirectDomains,
-                    placeholder = "example.com, mail.ru, *.gov.ru",
-                )
-                HintText("Через запятую или с новой строки. Эти домены пойдут мимо VPN.")
+        if (routingEnabled) {
+            item {
+                SettingsCard("РЕЖИМ") {
+                    SegmentedRow(
+                        options = listOf(
+                            RoutingMode.SMART to "Умный",
+                            RoutingMode.GLOBAL to "Всё через VPN",
+                        ),
+                        selected = routingMode,
+                        onSelect = viewModel::setRoutingMode,
+                    )
+                    HintText(
+                        when (routingMode) {
+                            RoutingMode.SMART -> "Российские сайты и локальная сеть идут напрямую, реклама блокируется, остальное — через VPN."
+                            RoutingMode.GLOBAL -> "Весь трафик идёт через VPN (кроме локальной сети). Без обхода РФ и блокировки рекламы."
+                        },
+                    )
+                }
             }
-        }
-        item {
-            SettingsCard("ДОМЕНЫ ЧЕРЕЗ VPN (принудительно)") {
-                DomainField(
-                    value = proxyDomains,
-                    onChange = viewModel::setProxyDomains,
-                    placeholder = "youtube.com, instagram.com",
-                )
-                HintText("Всегда идут через VPN, даже в «Умном» режиме и если попадают под обход РФ.")
+            item {
+                SettingsCard("ДОМЕНЫ В ОБХОД (напрямую)") {
+                    DomainField(
+                        value = directDomains,
+                        onChange = viewModel::setDirectDomains,
+                        placeholder = "example.com, mail.ru, *.gov.ru",
+                    )
+                    HintText("Через запятую или с новой строки. Эти домены пойдут мимо VPN.")
+                }
+            }
+            item {
+                SettingsCard("ДОМЕНЫ ЧЕРЕЗ VPN (принудительно)") {
+                    DomainField(
+                        value = proxyDomains,
+                        onChange = viewModel::setProxyDomains,
+                        placeholder = "youtube.com, instagram.com",
+                    )
+                    HintText("Всегда идут через VPN, даже в «Умном» режиме и если попадают под обход РФ.")
+                }
             }
         }
     }
