@@ -52,10 +52,15 @@ private val PingRed = Color(0xFFEF4444)
 @Composable
 fun ServersScreen(viewModel: ServersViewModel = viewModel()) {
     val servers by viewModel.servers.collectAsState()
+    val groups by viewModel.groups.collectAsState()
     val isPinging by viewModel.isPinging.collectAsState()
     var query by remember { mutableStateOf("") }
 
-    val filtered = servers.filter { it.name.contains(query, ignoreCase = true) }
+    // Filter within each group by the search query; drop groups that end up empty.
+    val filteredGroups = groups
+        .map { g -> g.copy(servers = g.servers.filter { it.name.contains(query, ignoreCase = true) }) }
+        .filter { it.servers.isNotEmpty() }
+    val multipleGroups = groups.size > 1
 
     Scaffold(
         topBar = {
@@ -85,13 +90,31 @@ fun ServersScreen(viewModel: ServersViewModel = viewModel()) {
                 EmptyServersState()
             } else {
                 LazyColumn(modifier = Modifier.padding(top = 12.dp)) {
-                    items(filtered, key = { it.id }) { server ->
-                        ServerRow(server = server, onClick = { viewModel.select(server) })
+                    filteredGroups.forEach { group ->
+                        // Only show section headers when there's more than one subscription -
+                        // a single-subscription list stays clean and flat.
+                        if (multipleGroups) {
+                            item(key = "hdr_${group.title}") { GroupHeader(group.title, group.servers.size) }
+                        }
+                        items(group.servers, key = { it.id }) { server ->
+                            ServerRow(server = server, onClick = { viewModel.select(server) })
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun GroupHeader(title: String, count: Int) {
+    Text(
+        "${title.uppercase()} · $count",
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 6.dp, start = 4.dp),
+    )
 }
 
 @Composable

@@ -49,6 +49,19 @@ class MainActivity : ComponentActivity() {
                 onDisconnect = ::disconnect,
             )
         }
+
+        handleTileIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTileIntent(intent)
+    }
+
+    /** Launched from the Quick Settings tile with EXTRA_CONNECT to trigger the consent + connect. */
+    private fun handleTileIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(EXTRA_CONNECT, false) == true) requestConnect()
     }
 
     private fun requestConnect() {
@@ -68,5 +81,9 @@ class MainActivity : ComponentActivity() {
     private fun disconnect() {
         val intent = Intent(this, LcVpnService::class.java).setAction(LcVpnService.ACTION_DISCONNECT)
         startService(intent)
+    }
+
+    companion object {
+        const val EXTRA_CONNECT = "com.lizercool.lcvpn.EXTRA_CONNECT"
     }
 }

@@ -13,9 +13,13 @@ import com.lizercool.lcvpn.vpn.LcVpnService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/** A subscription's servers, shown as a section on the Servers screen. */
+data class ServerGroup(val title: String, val servers: List<ServerEntity>)
 
 class ServersViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -24,6 +28,21 @@ class ServersViewModel(application: Application) : AndroidViewModel(application)
 
     val servers: StateFlow<List<ServerEntity>> = db.serverDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Servers grouped under their subscription, in subscription order; ungrouped ones last. */
+    val groups: StateFlow<List<ServerGroup>> =
+        combine(db.serverDao().observeAll(), db.subscriptionDao().observeAll()) { servers, subs ->
+            val bySub = servers.groupBy { it.subscriptionId }
+            val result = mutableListOf<ServerGroup>()
+            subs.forEach { sub ->
+                val list = bySub[sub.id].orEmpty()
+                if (list.isNotEmpty()) result += ServerGroup(sub.name, list)
+            }
+            // Servers whose subscription is missing/null go into a trailing catch-all group.
+            val orphaned = servers.filter { s -> subs.none { it.id == s.subscriptionId } }
+            if (orphaned.isNotEmpty()) result += ServerGroup("Прочие", orphaned)
+            result
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isPinging = MutableStateFlow(false)
     val isPinging: StateFlow<Boolean> = _isPinging
