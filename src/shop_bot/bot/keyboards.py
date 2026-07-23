@@ -7,7 +7,7 @@ from datetime import datetime
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from shop_bot.data_manager.remnawave_repository import get_setting
+from shop_bot.data_manager.remnawave_repository import get_setting, get_key_by_id
 from shop_bot.data_manager.database import get_button_configs
 from shop_bot.config import get_msk_time
 
@@ -690,6 +690,34 @@ def create_keys_management_keyboard(keys: list) -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
+def get_autopay_button(key_id: int) -> InlineKeyboardButton | None:
+    """Кнопка меню автоплатежа для ключа. None, если автоплатёж выключен в настройках."""
+    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
+        return None
+    try:
+        _key = get_key_by_id(key_id) or {}
+        _on = bool(int(_key.get("autopay_enabled") or 0))
+    except Exception:
+        _on = False
+    text = "🔄 Автоплатёж: вкл ✅" if _on else "🔄 Автоплатёж: выкл"
+    return InlineKeyboardButton(text=text, callback_data=f"autopay_menu_{key_id}")
+
+
+def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool, can_enable: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if autopay_on:
+        builder.button(text="🚫 Выключить автоплатёж", callback_data=f"autopay_off_{key_id}")
+    elif can_enable:
+        builder.button(text="✅ Включить автоплатёж", callback_data=f"autopay_on_{key_id}")
+    if card_bound:
+        builder.button(text="🗑 Отвязать карту", callback_data=f"autopay_unbind_{key_id}")
+    else:
+        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data=f"autopay_bind_{key_id}")
+    builder.button(text="⬅️ Назад к ключу", callback_data=f"show_key_{key_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def create_key_info_keyboard(key_id: int, connection_string: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     layout = []
@@ -708,11 +736,16 @@ def create_key_info_keyboard(key_id: int, connection_string: str | None = None) 
     builder.button(text="📖 Инструкция", callback_data=f"howto_vless_{key_id}")
     builder.button(text="📝 Комментарий", callback_data=f"key_comments_{key_id}")
     layout.append(2)
-    
+
+    _autopay_btn = get_autopay_button(key_id)
+    if _autopay_btn:
+        builder.add(_autopay_btn)
+        layout.append(1)
+
     builder.button(text="⬅️ Назад к списку ключей", callback_data="manage_keys")
     layout.append(1)
-    
-    builder.adjust(*layout) 
+
+    builder.adjust(*layout)
     return builder.as_markup()
 
 def create_qr_keyboard(key_id: int) -> InlineKeyboardMarkup:
@@ -1113,6 +1146,18 @@ def create_dynamic_keyboard(menu_type: str, user_keys: list = None, trial_availa
             
             if row_buttons_objs:
                 keyboard_rows.append(row_buttons_objs)
+
+        # Автоплатёж: кнопка добавляется и в динамическое меню ключа (конфиг кнопок в БД её не содержит)
+        if menu_type == "key_info_menu" and key_id is not None:
+            autopay_btn = get_autopay_button(key_id)
+            if autopay_btn:
+                insert_at = len(keyboard_rows)
+                for idx, row in enumerate(keyboard_rows):
+                    if any((b.callback_data or "") == "manage_keys" for b in row):
+                        insert_at = idx
+                        break
+                keyboard_rows.insert(insert_at, [autopay_btn])
+
         return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
         
     except Exception as e:

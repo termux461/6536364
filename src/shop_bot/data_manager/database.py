@@ -500,6 +500,7 @@ def initialize_db():
                 "admin_telegram_ids": None,
                 "yookassa_shop_id": None,
                 "yookassa_secret_key": None,
+                "yookassa_autopay_enabled": "false",
                 "sbp_enabled": "false",
                 "cryptobot_token": None,
                 "heleket_merchant_id": None,
@@ -675,6 +676,7 @@ def _ensure_users_columns(cursor: sqlite3.Cursor) -> None:
         "auth_token": "TEXT",
         "auth_email": "TEXT",
         "auth_pass": "TEXT",
+        "yookassa_payment_method_id": "TEXT",
     }
     for column, definition in mapping.items():
         _ensure_table_column(cursor, "users", column, definition)
@@ -988,6 +990,11 @@ def run_migration():
             _ensure_support_tickets_columns(cursor)
             _ensure_vpn_keys_schema(cursor)
             _ensure_table_column(cursor, "vpn_keys", "comment_key", "TEXT")
+            _ensure_table_column(cursor, "vpn_keys", "autopay_enabled", "INTEGER DEFAULT 0")
+            _ensure_table_column(cursor, "vpn_keys", "autopay_plan_id", "INTEGER")
+            _ensure_table_column(cursor, "vpn_keys", "autopay_price", "REAL")
+            _ensure_table_column(cursor, "vpn_keys", "autopay_months", "INTEGER")
+            _ensure_table_column(cursor, "vpn_keys", "autopay_last_charge", "TEXT")
             _ensure_ssh_targets_table(cursor)
             _ensure_host_speedtests_table(cursor)
             _ensure_resource_metrics_table(cursor)
@@ -2804,6 +2811,16 @@ def update_user_auth_token(telegram_id: int, token: str) -> bool:
     return cursor is not None and cursor.rowcount > 0
 # ==================================
 
+# ===== YOOKASSA PAYMENT METHOD (АВТОПЛАТЁЖ) =====
+def set_user_payment_method_id(telegram_id: int, payment_method_id: str | None) -> bool:
+    cursor = _exec("UPDATE users SET yookassa_payment_method_id = ? WHERE telegram_id = ?", (payment_method_id, telegram_id), f"Не удалось сохранить способ оплаты для {telegram_id}")
+    return cursor is not None and cursor.rowcount > 0
+
+def get_user_payment_method_id(telegram_id: int) -> str | None:
+    row = _fetch_row("SELECT yookassa_payment_method_id FROM users WHERE telegram_id = ?", (telegram_id,), f"Не удалось получить способ оплаты {telegram_id}")
+    return (dict(row).get("yookassa_payment_method_id") if row else None)
+# ==================================
+
 # ===== LINK_TELEGRAM_TO_EMAIL_USER =====
 def link_telegram_to_email_user(old_telegram_id: int, new_telegram_id: int, new_username: str):
     old_user = get_user(old_telegram_id)
@@ -3201,6 +3218,25 @@ def update_key_fields(
         updates["comment_key"] = comment_key
     return _apply_key_updates(key_id, updates)
 # ===========================
+
+
+# ===== АВТОПЛАТЁЖ ПО КЛЮЧУ =====
+def set_key_autopay(key_id: int, *, enabled: bool | None = None, plan_id: int | None = None, price: float | None = None, months: int | None = None) -> bool:
+    updates: dict[str, Any] = {}
+    if enabled is not None:
+        updates["autopay_enabled"] = 1 if enabled else 0
+    if plan_id is not None:
+        updates["autopay_plan_id"] = int(plan_id)
+    if price is not None:
+        updates["autopay_price"] = float(price)
+    if months is not None:
+        updates["autopay_months"] = int(months)
+    return _apply_key_updates(key_id, updates)
+
+
+def set_key_autopay_charged(key_id: int, when_iso: str) -> bool:
+    return _apply_key_updates(key_id, {"autopay_last_charge": when_iso})
+# ================================================
 
 
 # ===== DELETE_KEY_BY_EMAIL =====

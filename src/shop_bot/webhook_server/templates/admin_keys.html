@@ -646,7 +646,7 @@
                 const trafficStrategy = opt.getAttribute('data-traffic-strategy') || 'NO_RESET';
                 const strategyInput = document.getElementById('host_traffic_strategy');
                 if (strategyInput) {
-                    const labels = { 'NO_RESET': 'Никогда', 'DAY': 'Ежедневно', 'WEEK': 'Еженедельно', 'MONTH': 'Ежемесячно' };
+                    const labels = { 'NO_RESET': 'Никогда', 'DAY': 'Ежедневно', 'WEEK': 'Еженедельно', 'MONTH': 'Ежемесячно', 'MONTH_ROLLING': 'Ежемесячно (по дате создания)' };
                     strategyInput.value = labels[trafficStrategy] || trafficStrategy;
                 }
             }
