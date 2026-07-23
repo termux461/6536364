@@ -150,8 +150,14 @@ def _parse_dt(value) -> datetime | None:
 
 
 async def _maybe_process_autopayments(bot: Bot | None):
-    """Автопродление подписок с включённым автоплатежом ЮKassa за AUTOPAY_WINDOW_HOURS до истечения."""
+    """Автопродление подписок с включённым автопродлением за AUTOPAY_WINDOW_HOURS до истечения.
+
+    ВНИМАНИЕ: сейчас автопродление работает в визуальном режиме — тумблер в меню ключа
+    только меняет статус, реальных списаний нет. Реальная логика списания
+    (charge_key_autopay) сохранена, но не вызывается. Чтобы включить реальные
+    автосписания, снимите этот ранний return."""
     global _last_autopay_run_at
+    return  # визуальный режим: реальные списания отключены
     if bot is None:
         return
     if (rw_repo.get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
