@@ -1,0 +1,765 @@
+--- a/README.md	2026-07-23 17:12:56.698025020 +0000
++++ b/README.md	2026-07-23 17:09:57.000000000 +0000
+@@ -221,24 +221,28 @@
+ 
+ ## 🔄 Автоплатёж (рекуррентные платежи YooKassa)
+ 
+-Автоматическое продление подписки без участия пользователя по сохранённой карте.
++Автоматическое продление подписки без участия пользователя.
+ 
+ 1. Включите тумблер **Автоплатёж (рекуррент)** в блоке YooKassa (**Настройки → Платёжные системы**).
+-2. При покупке/продлении подписки через YooKassa бот запрашивает у YooKassa сохранение способа оплаты (`save_payment_method`), а вебхук `payment.succeeded` сохраняет `payment_method_id` пользователя.
+-3. Автопродление включается для оплаченного ключа. Пользователь может включить/выключить автоплатёж кнопкой в меню ключа (**Мои ключи → ключ → 🔄 Автоплатёж**).
+-4. Планировщик раз в час проверяет ключи с включённым автоплатежом: за ~24 часа до окончания подписки создаётся рекуррентное списание по сохранённому `payment_method_id`. Успешная оплата продлевает ключ через тот же обработчик, что и обычные платежи (повторная обработка защищена дедупликацией по `payment_id`).
++2. В меню ключа (**Мои ключи → ключ → 🔄 Автоплатёж**) пользователь управляет автоплатежом:
++   - **Привязка карты** — проверочный платёж **10 ₽** с `save_payment_method`, сумма автоматически возвращается на карту сразу после оплаты (возврат через YooKassa Refunds API). Карта сохраняется как `payment_method_id`.
++   - **Вкл/выкл автопродление** и **отвязка карты** (при отвязке автоплатёж отключается на всех ключах).
++3. Карта также сохраняется автоматически при обычной оплате подписки через YooKassa (в этом случае автоплатёж включается сразу). Оплата с внутреннего баланса тоже сохраняет параметры продления — достаточно один раз привязать карту, и автоплатёж доступен для такого ключа.
++4. Планировщик раз в час проверяет ключи с включённым автоплатежом. За ~24 часа до окончания подписки бот продлевает её: **сначала списывает с внутреннего баланса**, а при нехватке средств — **рекуррентным платежом по привязанной карте**. При неудаче пользователь получает уведомление с кнопками продления/пополнения. Повторная обработка защищена дедупликацией по `payment_id`.
++5. Цена продления берётся из актуальной цены тарифа (разовые промо-скидки не «замораживаются»).
+ 
+-> Требуется активная YooKassa (`yookassa_shop_id`, `yookassa_secret_key`) и корректно настроенный вебхук `https://domain.com/yookassa-webhook`.
++> Требуется активная YooKassa (`yookassa_shop_id`, `yookassa_secret_key`) с разрешёнными рекуррентными платежами и корректно настроенный вебхук `https://domain.com/yookassa-webhook`.
+ 
+ ---
+ 
+ ## 🔁 Помесячный сброс трафика по дате создания
+ 
+-Обнуление счётчика трафика каждого ключа раз в месяц в число, соответствующее дате его создания.
++Используется нативная стратегия Remnawave `MONTH_ROLLING` — панель сама обнуляет трафик пользователя раз в месяц в число, соответствующее дате его создания (для коротких месяцев берётся последний день).
+ 
+-1. Включите тумблер **Помесячный сброс трафика** (**Настройки → Общие**, карточка рядом с пробным периодом).
+-2. Планировщик раз в час проверяет активные ключи: если сегодняшнее число совпадает с днём создания ключа — вызывается сброс трафика в Remnawave (`reset-traffic`). Для коротких месяцев (например, ключ создан 31-го) берётся последний день месяца.
+-3. Повторный сброс в течение одного месяца исключён (отметка `last_traffic_reset`). Истёкшие ключи не сбрасываются.
++1. В **Настройки → Хосты → Сброс трафика** выберите **«Ежемесячно (по дате создания)»** и нажмите «Применить».
++2. Стратегия применяется к пользователям Remnawave при создании нового ключа и при каждом продлении существующего. Уже выданные ключи получат новую стратегию при следующем продлении (или её можно выставить вручную в панели Remnawave).
++
++> Требуется версия Remnawave с поддержкой стратегии `MONTH_ROLLING` (в списке стратегий панели есть пункт «Сброс ежемесячно (по дате создания)»).
+ 
+ ---
+ 
+--- a/src/shop_bot/bot/handlers.py	2026-07-23 17:12:56.700029294 +0000
++++ b/src/shop_bot/bot/handlers.py	2026-07-23 17:09:57.000000000 +0000
+@@ -325,6 +325,24 @@
+         raise RuntimeError("YooKassa: не удалось создать платеж")
+ 
+ 
++# Сумма проверочного платежа при привязке карты (возвращается пользователю сразу после оплаты)
++CARD_BIND_AMOUNT_RUB = 10.0
++
++
++async def create_yookassa_refund_async(yk_payment_id: str, amount: float, idempotence_key: str, shop_id: str, secret_key: str, timeout_seconds: int = 20) -> dict:
++    """Возврат платежа YooKassa (используется для возврата 10 ₽ после привязки карты)."""
++    timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=12, sock_read=timeout_seconds)
++    headers = {"Idempotence-Key": str(idempotence_key)}
++    auth = aiohttp.BasicAuth(str(shop_id), str(secret_key))
++    api_payload = {"payment_id": str(yk_payment_id), "amount": {"value": f"{amount:.2f}", "currency": "RUB"}}
++    async with aiohttp.ClientSession(timeout=timeout, auth=auth) as session:
++        async with session.post("https://api.yookassa.ru/v3/refunds", json=api_payload, headers=headers) as response:
++            raw = await response.text()
++            if response.status >= 400:
++                raise RuntimeError(f"YooKassa refund HTTP {response.status}: {raw[:500]}")
++            return json.loads(raw or "{}")
++
++
+ async def create_yookassa_recurring_payment_async(payload: dict, idempotence_key: str, shop_id: str, secret_key: str, timeout_seconds: int = 20) -> dict:
+     """Рекуррентное (автоматическое) списание по сохранённому payment_method_id — без подтверждения пользователем."""
+     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=12, sock_read=timeout_seconds)
+@@ -2232,6 +2250,54 @@
+         await refresh_key_info_internal(bot=bot, chat_id=callback.message.chat.id, message_to_edit=callback.message, key_id=kid, user_id=callback.from_user.id)
+     # ===== Конец функции show_key_handler =====
+ 
++    # ===== МЕНЮ АВТОПЛАТЕЖА ПО КЛЮЧУ =====
++    async def render_autopay_menu(message: types.Message, kid: int, user_id: int):
++        key = rw_repo.get_key_by_id(kid) or {}
++        pm_id = rw_repo.get_user_payment_method_id(user_id)
++        autopay_on = bool(int(key.get("autopay_enabled") or 0))
++        has_params = bool(key.get('autopay_plan_id') and key.get('autopay_price') and key.get('autopay_months'))
++        balance = 0.0
++        try: balance = float(get_balance(user_id) or 0)
++        except Exception: pass
++
++        lines = [f"🔄 <b>Автоплатёж для ключа #{kid}</b>\n"]
++        lines.append(f"Статус: {'✅ включён' if autopay_on else '🚫 выключен'}")
++        lines.append(f"Карта: {'💳 привязана' if pm_id else '❌ не привязана'}")
++        lines.append(f"Баланс: <code>{balance:.2f} RUB</code>")
++        if has_params:
++            _months, _price = int(key['autopay_months']), float(key['autopay_price'])
++            try:
++                _plan = get_plan_by_id(key['autopay_plan_id'])
++                if _plan:
++                    _price = float(_plan.get('price') or _price)
++                    _months = int(_plan.get('months') or _months)
++            except Exception:
++                pass
++            lines.append(f"Продление: <b>{_months} мес. за {_price:.2f} RUB</b>")
++        else:
++            lines.append("Продление: <i>параметры появятся после первой оплаты подписки</i>")
++        lines.append("\nЗа сутки до окончания подписки бот продлит её автоматически: сначала спишет с баланса, а если средств не хватит — с привязанной карты.")
++        if not pm_id:
++            lines.append("\n💳 Привязка карты: спишем <b>10 ₽</b> для проверки и сразу вернём их на карту.")
++
++        kb = keyboards.create_autopay_menu_keyboard(kid, autopay_on=autopay_on, card_bound=bool(pm_id), can_enable=has_params and bool(pm_id))
++        await smart_edit_message(message, "\n".join(lines), kb)
++
++    @user_router.callback_query(F.data.startswith("autopay_menu_"))
++    @anti_spam
++    @registration_required
++    async def autopay_menu_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
++        if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
++            return await callback.answer("⚠️ Автоплатёж недоступен.", show_alert=True)
++        await callback.answer()
++        try: kid = int(callback.data[len("autopay_menu_"):])
++        except ValueError: return
++        key = rw_repo.get_key_by_id(kid)
++        if not key or key.get('user_id') != callback.from_user.id:
++            return await callback.answer("❌ Ключ не найден.", show_alert=True)
++        await render_autopay_menu(callback.message, kid, callback.from_user.id)
++    # ===== Конец функции autopay_menu_handler =====
++
+     # ===== ВКЛ/ВЫКЛ АВТОПЛАТЁЖ ПО КЛЮЧУ =====
+     @user_router.callback_query(F.data.startswith("autopay_on_") | F.data.startswith("autopay_off_"))
+     @anti_spam
+@@ -2253,18 +2319,101 @@
+         if enable:
+             pm_id = rw_repo.get_user_payment_method_id(callback.from_user.id)
+             if not pm_id:
+-                return await callback.answer("💳 Нет сохранённой карты. Оплатите подписку через ЮKassa, чтобы включить автоплатёж.", show_alert=True)
++                return await callback.answer("💳 Сначала привяжите карту — кнопка ниже.", show_alert=True)
+             if not (key.get('autopay_plan_id') and key.get('autopay_price') and key.get('autopay_months')):
+-                return await callback.answer("ℹ️ Автоплатёж включится автоматически после оплаты подписки через ЮKassa.", show_alert=True)
++                return await callback.answer("ℹ️ Параметры продления появятся после первой оплаты подписки.", show_alert=True)
+             rw_repo.set_key_autopay(kid, enabled=True)
+-            await callback.answer("✅ Автоплатёж включён.", show_alert=True)
++            await callback.answer("✅ Автоплатёж включён.")
+         else:
+             rw_repo.set_key_autopay(kid, enabled=False)
+-            await callback.answer("🚫 Автоплатёж отключён.", show_alert=True)
++            await callback.answer("🚫 Автоплатёж отключён.")
+ 
+-        await refresh_key_info_internal(bot=bot, chat_id=callback.message.chat.id, message_to_edit=callback.message, key_id=kid, user_id=callback.from_user.id)
++        await render_autopay_menu(callback.message, kid, callback.from_user.id)
+     # ===== Конец функции toggle_autopay_handler =====
+ 
++    # ===== ПРИВЯЗКА КАРТЫ (10 ₽ С ВОЗВРАТОМ) =====
++    @user_router.callback_query(F.data.startswith("autopay_bind_"))
++    @anti_spam
++    @registration_required
++    async def autopay_bind_card_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
++        if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
++            return await callback.answer("⚠️ Автоплатёж недоступен.", show_alert=True)
++        shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
++        if not shop_id or not secret:
++            return await callback.answer("⚠️ ЮKassa не настроена.", show_alert=True)
++        try: kid = int(callback.data[len("autopay_bind_"):])
++        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
++        key = rw_repo.get_key_by_id(kid)
++        if not key or key.get('user_id') != callback.from_user.id:
++            return await callback.answer("❌ Ключ не найден.", show_alert=True)
++
++        await callback.answer("⏳ Создаю платёж...")
++        user_id = callback.from_user.id
++        amount = CARD_BIND_AMOUNT_RUB
++        payment_id = str(uuid.uuid4())
++        metadata = {
++            "user_id": user_id,
++            "months": 0,
++            "price": float(amount),
++            "action": "bind_card",
++            "key_id": kid,
++            "host_name": key.get('host_name'),
++            "plan_id": None,
++            "customer_email": None,
++            "payment_method": "YooKassa",
++            "payment_id": payment_id,
++        }
++        try:
++            create_payload_pending(payment_id, user_id, float(amount), metadata)
++            description = "Привязка карты для автоплатежа (сумма будет возвращена)"
++            payload = {
++                "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
++                "confirmation": {"type": "redirect", "return_url": f"https://t.me/{TELEGRAM_BOT_USERNAME}"},
++                "capture": True,
++                "save_payment_method": True,
++                "description": description,
++                "metadata": metadata,
++            }
++            email = get_setting("receipt_email")
++            if email and is_valid_email(email):
++                payload['receipt'] = {"customer": {"email": email}, "items": [{"description": description, "quantity": "1.00", "amount": {"value": f"{amount:.2f}", "currency": "RUB"}, "vat_code": "1", "payment_subject": "service", "payment_mode": "full_payment"}]}
++            pay_obj = await create_yookassa_payment_async(payload, payment_id, shop_id, secret)
++            kb = InlineKeyboardBuilder()
++            kb.button(text=f"💳 Оплатить {amount:.0f} ₽", url=pay_obj["confirmation"]["confirmation_url"])
++            kb.button(text="⬅️ Назад", callback_data=f"autopay_menu_{kid}")
++            kb.adjust(1)
++            await smart_edit_message(
++                callback.message,
++                f"💳 <b>Привязка карты</b>\n\nДля проверки карты будет списано <b>{amount:.0f} ₽</b> — мы сразу же вернём их на карту.\n\nПосле оплаты карта будет сохранена для автоплатежа, бот пришлёт подтверждение.",
++                kb.as_markup(),
++            )
++            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты (платёж {payment_id})")
++        except Exception as e:
++            logger.error(f"Автоплатёж: ошибка создания платежа привязки карты для {user_id}: {e}", exc_info=True)
++            await callback.message.answer("⚠️ ЮKassa временно не отвечает. Попробуйте позже.")
++    # ===== Конец функции autopay_bind_card_handler =====
++
++    # ===== ОТВЯЗКА КАРТЫ =====
++    @user_router.callback_query(F.data.startswith("autopay_unbind_"))
++    @anti_spam
++    @registration_required
++    async def autopay_unbind_card_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
++        try: kid = int(callback.data[len("autopay_unbind_"):])
++        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
++        user_id = callback.from_user.id
++        rw_repo.set_user_payment_method_id(user_id, None)
++        # Без карты рекуррентные списания невозможны — выключаем автоплатёж на всех ключах пользователя
++        try:
++            for k in (rw_repo.get_user_keys(user_id) or []):
++                if int(k.get("autopay_enabled") or 0):
++                    rw_repo.set_key_autopay(int(k["key_id"]), enabled=False)
++        except Exception as e:
++            logger.error(f"Автоплатёж: ошибка отключения автоплатежа после отвязки карты {user_id}: {e}")
++        await callback.answer("🗑 Карта отвязана, автоплатёж отключён.", show_alert=True)
++        logger.info(f"Автоплатёж: пользователь {user_id} отвязал карту")
++        await render_autopay_menu(callback.message, kid, user_id)
++    # ===== Конец функции autopay_unbind_card_handler =====
++
+     # ===== НАЧАЛО ПЕРЕНОСА КЛЮЧА НА ДРУГОЙ СЕРВЕР =====
+     # Предоставляет выбор доступных серверов для миграции текущего ключа
+     @user_router.callback_query(F.data.startswith("switch_server_"))
+@@ -3435,6 +3584,61 @@
+                 if bot: await bot.delete_message(chat_id=metadata['chat_id'], message_id=metadata['message_id'])
+             except: pass
+ 
++        # --- ПРИВЯЗКА КАРТЫ ДЛЯ АВТОПЛАТЕЖА (проверочный платёж возвращается) ---
++        if action == "bind_card":
++            user_info = get_user(uid)
++            username = (user_info.get('username') if user_info else '') or f"@{uid}"
++            bind_meta = dict(metadata or {})
++            bind_meta.update({"reason": "card_binding_verification_payment"})
++            log_transaction(username=username, transaction_id=None, payment_id=pay_id or str(uuid.uuid4()), user_id=uid, status='paid', amount_rub=float(price), amount_currency=None, currency_name=None, payment_method='YooKassa', metadata=json.dumps(bind_meta, ensure_ascii=False))
++
++            pm_id = rw_repo.get_user_payment_method_id(uid)
++            if not pm_id:
++                logger.error(f"Автоплатёж: платёж привязки {pay_id} прошёл, но карта пользователя {uid} не сохранена (вебхук не передал payment_method.saved)")
++
++            # Возврат проверочного платежа
++            refund_ok = False
++            yk_payment_id = metadata.get('yk_payment_id')
++            if yk_payment_id:
++                shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
++                try:
++                    await create_yookassa_refund_async(yk_payment_id, float(price), f"refund-{pay_id}", shop_id, secret)
++                    refund_ok = True
++                    logger.info(f"Автоплатёж: проверочный платёж {yk_payment_id} возвращён пользователю {uid}")
++                except Exception as e:
++                    logger.error(f"Автоплатёж: не удалось вернуть проверочный платёж {yk_payment_id} пользователю {uid}: {e}")
++            else:
++                logger.error(f"Автоплатёж: в метаданных платежа {pay_id} нет yk_payment_id — возврат не выполнен")
++
++            # Если привязку начали из меню ключа — включаем автоплатёж для него
++            enabled_key = None
++            if pm_id and kid:
++                try:
++                    key = rw_repo.get_key_by_id(kid)
++                    if key and key.get('user_id') == uid and key.get('autopay_plan_id') and key.get('autopay_price') and key.get('autopay_months'):
++                        rw_repo.set_key_autopay(kid, enabled=True)
++                        enabled_key = kid
++                        logger.info(f"Автоплатёж: включён для ключа #{kid} после привязки карты пользователем {uid}")
++                except Exception as e:
++                    logger.error(f"Автоплатёж: не удалось включить автоплатёж для ключа #{kid} после привязки карты: {e}")
++
++            if bot and not str(uid).startswith("999"):
++                if pm_id:
++                    txt = "✅ <b>Карта привязана!</b>\n"
++                    txt += f"💸 {float(price):.0f} ₽ {'уже возвращены' if refund_ok else 'будут возвращены'} на вашу карту.\n"
++                    if enabled_key:
++                        txt += f"\n🔄 Автоплатёж для ключа #{enabled_key} включён."
++                    else:
++                        txt += "\n🔄 Теперь вы можете включить автоплатёж в меню ключа."
++                else:
++                    txt = "⚠️ Оплата прошла, но сохранить карту не удалось. Обратитесь в поддержку."
++                kb = None
++                if kid:
++                    kb = InlineKeyboardBuilder().button(text="🔄 К автоплатежу", callback_data=f"autopay_menu_{kid}").as_markup()
++                try: await bot.send_message(uid, txt, reply_markup=kb)
++                except Exception: pass
++            return True
++
+         # --- ПОПОЛНЕНИЕ БАЛАНСА ---
+         if action == "top_up":
+             old_balance = get_balance(uid)
+@@ -3639,13 +3843,17 @@
+ 
+             update_user_stats(uid, price, months)
+ 
+-            # Автоплатёж: сохраняем параметры продления на ключе (нужны для рекуррентного списания)
++            # Автоплатёж: сохраняем параметры продления на ключе (нужны для автосписания)
+             if plan_id and months:
+                 try:
++                    autopay_on = (get_setting("yookassa_autopay_enabled") or "false").strip().lower() == "true"
+                     want_autopay = str(metadata.get('autopay') or '') in ('1', 'true', 'True')
+-                    # enabled=True только при оплате с сохранением карты; иначе состояние не трогаем
+-                    rw_repo.set_key_autopay(kid, enabled=(True if want_autopay else None), plan_id=plan_id, price=float(price), months=months)
+-                    if want_autopay:
++                    # Включаем автоплатёж при оплате через ЮKassa с сохранением карты, а также при
++                    # оплате с баланса, если у пользователя уже привязана карта (симметричное поведение).
++                    has_card = bool(rw_repo.get_user_payment_method_id(uid))
++                    enable = True if (autopay_on and has_card and (want_autopay or (pay_method or '').lower() == 'balance')) else None
++                    rw_repo.set_key_autopay(kid, enabled=enable, plan_id=plan_id, price=float(price), months=months)
++                    if enable:
+                         logger.info(f"Автоплатёж: включён для ключа #{kid} пользователя {uid}")
+                 except Exception as e:
+                     logger.error(f"Автоплатёж: не удалось сохранить параметры для ключа #{kid}: {e}")
+@@ -3717,31 +3925,38 @@
+ # ===== Конец функции process_successful_payment =====
+ 
+ 
+-# ===== АВТОПЛАТЁЖ: РЕКУРРЕНТНОЕ СПИСАНИЕ ПО КЛЮЧУ =====
++# ===== АВТОПЛАТЁЖ: АВТОПРОДЛЕНИЕ КЛЮЧА =====
+ async def charge_key_autopay(bot: Bot | None, key: dict) -> bool:
+-    """Пытается автоматически продлить подписку по сохранённому способу оплаты ЮKassa.
+-    Возвращает True, если списание было инициировано (создан платёж)."""
++    """Автоматически продлевает подписку: сначала пытается списать с внутреннего баланса,
++    затем — рекуррентным платежом ЮKassa по сохранённой карте.
++    Возвращает True, если попытка продления была выполнена (успешно или нет)."""
+     if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
+         return False
+ 
+-    shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
+-    if not shop_id or not secret:
+-        return False
+-
+     user_id = int(key.get("user_id"))
+     key_id = int(key.get("key_id"))
+-    pm_id = rw_repo.get_user_payment_method_id(user_id)
+-    if not pm_id:
+-        logger.info(f"Автоплатёж: у пользователя {user_id} нет сохранённого способа оплаты — пропуск ключа #{key_id}")
+-        return False
+ 
+     price = float(key.get("autopay_price") or 0)
+     months = int(key.get("autopay_months") or 0)
+     plan_id = key.get("autopay_plan_id")
++    # Актуальная цена тарифа приоритетнее сохранённой (в сохранённой могла быть разовая промо-скидка)
++    try:
++        plan = get_plan_by_id(plan_id) if plan_id else None
++        if plan:
++            price = float(plan.get('price') or price)
++            months = int(plan.get('months') or months)
++    except Exception:
++        pass
+     if price <= 0 or months <= 0 or not plan_id:
+         logger.warning(f"Автоплатёж: некорректные параметры для ключа #{key_id} (price={price}, months={months}, plan_id={plan_id})")
+         return False
+ 
++    # Отмечаем попытку сразу, чтобы не продлить повторно на следующей итерации планировщика
++    try:
++        rw_repo.set_key_autopay_charged(key_id, datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S"))
++    except Exception:
++        pass
++
+     payment_id = str(uuid.uuid4())
+     metadata = {
+         "user_id": user_id,
+@@ -3752,10 +3967,35 @@
+         "host_name": key.get("host_name"),
+         "plan_id": plan_id,
+         "customer_email": get_setting("receipt_email"),
+-        "payment_method": "YooKassa",
++        "payment_method": "Balance",
+         "payment_id": payment_id,
+         "autopay": "1",
+     }
++
++    # 1) Сначала пробуем внутренний баланс — как при обычной оплате с баланса
++    try:
++        balance = float(get_balance(user_id) or 0)
++    except Exception:
++        balance = 0.0
++    if balance >= price and deduct_from_balance(user_id, price):
++        logger.info(f"Автоплатёж: продление ключа #{key_id} пользователя {user_id} с баланса ({price:.2f} RUB)")
++        try:
++            ok = await process_successful_payment(bot, metadata)
++            if not ok:
++                logger.error(f"Автоплатёж: продление с баланса не удалось для ключа #{key_id}")
++        except Exception as e:
++            logger.error(f"Автоплатёж: ошибка продления с баланса ключа #{key_id}: {e}", exc_info=True)
++        return True
++
++    # 2) Затем — рекуррентное списание по сохранённой карте
++    shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
++    pm_id = rw_repo.get_user_payment_method_id(user_id)
++    if not pm_id or not shop_id or not secret:
++        logger.info(f"Автоплатёж: у пользователя {user_id} нет карты и не хватает баланса — пропуск ключа #{key_id}")
++        await _notify_autopay_failure(bot, user_id, key_id, price, reason="no_funds")
++        return True
++
++    metadata["payment_method"] = "YooKassa"
+     try:
+         create_payload_pending(payment_id, user_id, float(price), metadata)
+     except Exception as e:
+@@ -3784,17 +4024,12 @@
+             }],
+         }
+ 
+-    # Отмечаем попытку списания сразу, чтобы не списать повторно на следующей итерации планировщика
+-    try:
+-        rw_repo.set_key_autopay_charged(key_id, datetime.now(timezone(timedelta(hours=3))).strftime("%Y-%m-%d %H:%M:%S"))
+-    except Exception:
+-        pass
+-
+     try:
+         result = await create_yookassa_recurring_payment_async(payload, payment_id, shop_id, secret)
+     except Exception as e:
+         logger.error(f"Автоплатёж: ошибка списания для ключа #{key_id} пользователя {user_id}: {e}")
+-        return False
++        await _notify_autopay_failure(bot, user_id, key_id, price, reason="card_error")
++        return True
+ 
+     status = (result or {}).get("status")
+     logger.info(f"Автоплатёж: списание по ключу #{key_id} пользователя {user_id}, статус={status}")
+@@ -3805,7 +4040,34 @@
+             await process_successful_payment(bot, metadata)
+         except Exception as e:
+             logger.error(f"Автоплатёж: ошибка обработки успешного списания ключа #{key_id}: {e}")
+-    elif status in (None, "canceled"):
+-        logger.warning(f"Автоплатёж: списание не удалось для ключа #{key_id} (статус={status})")
++    elif status == "canceled":
++        logger.warning(f"Автоплатёж: списание отклонено для ключа #{key_id} (статус={status})")
++        await _notify_autopay_failure(bot, user_id, key_id, price, reason="card_declined")
+     return True
+ # ===== Конец функции charge_key_autopay =====
++
++
++# ===== АВТОПЛАТЁЖ: УВЕДОМЛЕНИЕ О НЕУДАЧЕ =====
++async def _notify_autopay_failure(bot: Bot | None, user_id: int, key_id: int, price: float, reason: str):
++    if not bot or str(user_id).startswith("999"):
++        return
++    reasons = {
++        "no_funds": "на балансе не хватает средств, а карта не привязана",
++        "card_error": "не удалось выполнить списание с карты",
++        "card_declined": "банк отклонил списание с карты",
++    }
++    txt = (
++        f"⚠️ <b>Автопродление не удалось</b>\n\n"
++        f"Ключ #{key_id}: {reasons.get(reason, 'ошибка оплаты')}.\n"
++        f"Сумма продления: <code>{price:.2f} RUB</code>\n\n"
++        f"Пополните баланс или продлите ключ вручную, чтобы подписка не отключилась."
++    )
++    kb = InlineKeyboardBuilder()
++    kb.button(text="➕ Продлить ключ", callback_data=f"extend_key_{key_id}")
++    kb.button(text="💰 Пополнить баланс", callback_data="top_up_start")
++    kb.adjust(1)
++    try:
++        await bot.send_message(user_id, txt, reply_markup=kb.as_markup())
++    except Exception:
++        pass
++# ===== Конец функции _notify_autopay_failure =====
+\ No newline at end of file
+--- a/src/shop_bot/bot/keyboards.py	2026-07-23 17:12:56.700672302 +0000
++++ b/src/shop_bot/bot/keyboards.py	2026-07-23 17:09:57.000000000 +0000
+@@ -690,6 +690,34 @@
+     builder.adjust(1)
+     return builder.as_markup()
+ 
++def get_autopay_button(key_id: int) -> InlineKeyboardButton | None:
++    """Кнопка меню автоплатежа для ключа. None, если автоплатёж выключен в настройках."""
++    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
++        return None
++    try:
++        _key = get_key_by_id(key_id) or {}
++        _on = bool(int(_key.get("autopay_enabled") or 0))
++    except Exception:
++        _on = False
++    text = "🔄 Автоплатёж: вкл ✅" if _on else "🔄 Автоплатёж: выкл"
++    return InlineKeyboardButton(text=text, callback_data=f"autopay_menu_{key_id}")
++
++
++def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool, can_enable: bool) -> InlineKeyboardMarkup:
++    builder = InlineKeyboardBuilder()
++    if autopay_on:
++        builder.button(text="🚫 Выключить автоплатёж", callback_data=f"autopay_off_{key_id}")
++    elif can_enable:
++        builder.button(text="✅ Включить автоплатёж", callback_data=f"autopay_on_{key_id}")
++    if card_bound:
++        builder.button(text="🗑 Отвязать карту", callback_data=f"autopay_unbind_{key_id}")
++    else:
++        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data=f"autopay_bind_{key_id}")
++    builder.button(text="⬅️ Назад к ключу", callback_data=f"show_key_{key_id}")
++    builder.adjust(1)
++    return builder.as_markup()
++
++
+ def create_key_info_keyboard(key_id: int, connection_string: str | None = None) -> InlineKeyboardMarkup:
+     builder = InlineKeyboardBuilder()
+     layout = []
+@@ -709,16 +737,9 @@
+     builder.button(text="📝 Комментарий", callback_data=f"key_comments_{key_id}")
+     layout.append(2)
+ 
+-    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() == "true":
+-        try:
+-            _key = get_key_by_id(key_id) or {}
+-            _on = bool(int(_key.get("autopay_enabled") or 0))
+-        except Exception:
+-            _on = False
+-        if _on:
+-            builder.button(text="🔄 Автоплатёж: вкл ✅", callback_data=f"autopay_off_{key_id}")
+-        else:
+-            builder.button(text="🔄 Автоплатёж: выкл", callback_data=f"autopay_on_{key_id}")
++    _autopay_btn = get_autopay_button(key_id)
++    if _autopay_btn:
++        builder.add(_autopay_btn)
+         layout.append(1)
+ 
+     builder.button(text="⬅️ Назад к списку ключей", callback_data="manage_keys")
+@@ -1125,6 +1146,18 @@
+             
+             if row_buttons_objs:
+                 keyboard_rows.append(row_buttons_objs)
++
++        # Автоплатёж: кнопка добавляется и в динамическое меню ключа (конфиг кнопок в БД её не содержит)
++        if menu_type == "key_info_menu" and key_id is not None:
++            autopay_btn = get_autopay_button(key_id)
++            if autopay_btn:
++                insert_at = len(keyboard_rows)
++                for idx, row in enumerate(keyboard_rows):
++                    if any((b.callback_data or "") == "manage_keys" for b in row):
++                        insert_at = idx
++                        break
++                keyboard_rows.insert(insert_at, [autopay_btn])
++
+         return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+         
+     except Exception as e:
+--- a/src/shop_bot/data_manager/database.py	2026-07-23 17:12:56.700672302 +0000
++++ b/src/shop_bot/data_manager/database.py	2026-07-23 17:09:57.000000000 +0000
+@@ -501,7 +501,6 @@
+                 "yookassa_shop_id": None,
+                 "yookassa_secret_key": None,
+                 "yookassa_autopay_enabled": "false",
+-                "monthly_traffic_reset_enabled": "false",
+                 "sbp_enabled": "false",
+                 "cryptobot_token": None,
+                 "heleket_merchant_id": None,
+@@ -996,7 +995,6 @@
+             _ensure_table_column(cursor, "vpn_keys", "autopay_price", "REAL")
+             _ensure_table_column(cursor, "vpn_keys", "autopay_months", "INTEGER")
+             _ensure_table_column(cursor, "vpn_keys", "autopay_last_charge", "TEXT")
+-            _ensure_table_column(cursor, "vpn_keys", "last_traffic_reset", "TEXT")
+             _ensure_ssh_targets_table(cursor)
+             _ensure_host_speedtests_table(cursor)
+             _ensure_resource_metrics_table(cursor)
+@@ -3222,7 +3220,7 @@
+ # ===========================
+ 
+ 
+-# ===== АВТОПЛАТЁЖ / СБРОС ТРАФИКА ПО КЛЮЧУ =====
++# ===== АВТОПЛАТЁЖ ПО КЛЮЧУ =====
+ def set_key_autopay(key_id: int, *, enabled: bool | None = None, plan_id: int | None = None, price: float | None = None, months: int | None = None) -> bool:
+     updates: dict[str, Any] = {}
+     if enabled is not None:
+@@ -3236,10 +3234,6 @@
+     return _apply_key_updates(key_id, updates)
+ 
+ 
+-def set_key_last_traffic_reset(key_id: int, marker: str) -> bool:
+-    return _apply_key_updates(key_id, {"last_traffic_reset": marker})
+-
+-
+ def set_key_autopay_charged(key_id: int, when_iso: str) -> bool:
+     return _apply_key_updates(key_id, {"autopay_last_charge": when_iso})
+ # ================================================
+--- a/src/shop_bot/data_manager/remnawave_repository.py	2026-07-23 17:12:56.701301084 +0000
++++ b/src/shop_bot/data_manager/remnawave_repository.py	2026-07-23 17:09:57.000000000 +0000
+@@ -368,7 +368,6 @@
+     "set_user_payment_method_id",
+     "get_user_payment_method_id",
+     "set_key_autopay",
+-    "set_key_last_traffic_reset",
+     "set_key_autopay_charged",
+ )
+ 
+--- a/src/shop_bot/data_manager/scheduler.py	2026-07-23 17:12:56.701326558 +0000
++++ b/src/shop_bot/data_manager/scheduler.py	2026-07-23 17:09:57.000000000 +0000
+@@ -35,12 +35,10 @@
+ _last_resource_collect_at: datetime | None = None
+ _last_resource_alert_at: dict[tuple[str, str, str], datetime] = {}
+ _last_autopay_run_at: datetime | None = None
+-_last_traffic_reset_run_at: datetime | None = None
+ 
+ AUTOPAY_INTERVAL_SECONDS = 3600
+ AUTOPAY_WINDOW_HOURS = 24
+ AUTOPAY_MIN_RECHARGE_HOURS = 20
+-TRAFFIC_RESET_INTERVAL_SECONDS = 3600
+ 
+ def format_time_left(hours: int) -> str:
+     if hours >= 24:
+@@ -151,14 +149,6 @@
+         return None
+ 
+ 
+-def _days_in_month(year: int, month: int) -> int:
+-    if month == 12:
+-        nxt = datetime(year + 1, 1, 1)
+-    else:
+-        nxt = datetime(year, month + 1, 1)
+-    return (nxt - timedelta(days=1)).day
+-
+-
+ async def _maybe_process_autopayments(bot: Bot | None):
+     """Автопродление подписок с включённым автоплатежом ЮKassa за AUTOPAY_WINDOW_HOURS до истечения."""
+     global _last_autopay_run_at
+@@ -206,57 +196,6 @@
+         logger.info(f"Scheduler: Автоплатёж — инициировано списаний: {processed}")
+ 
+ 
+-async def _maybe_reset_monthly_traffic():
+-    """Помесячный сброс трафика по числу создания ключа."""
+-    global _last_traffic_reset_run_at
+-    if (rw_repo.get_setting("monthly_traffic_reset_enabled") or "false").strip().lower() != "true":
+-        return
+-
+-    now = get_msk_time()
+-    if _last_traffic_reset_run_at and (now - _last_traffic_reset_run_at).total_seconds() < TRAFFIC_RESET_INTERVAL_SECONDS:
+-        return
+-    _last_traffic_reset_run_at = now
+-
+-    today = now.replace(tzinfo=None)
+-    month_marker = f"{today.year}-{today.month:02d}"
+-    dim = _days_in_month(today.year, today.month)
+-    current_expire_guard = today
+-    reset_count = 0
+-
+-    for key in rw_repo.get_all_keys():
+-        try:
+-            uuid_val = key.get("remnawave_user_uuid")
+-            if not uuid_val:
+-                continue
+-
+-            created = _parse_dt(key.get("created_date") or key.get("created_at"))
+-            if not created:
+-                continue
+-
+-            # Не сбрасываем трафик у истёкших ключей
+-            expiry = _parse_dt(key.get("expiry_date") or key.get("expire_at"))
+-            if expiry and expiry < current_expire_guard:
+-                continue
+-
+-            reset_day = min(created.day, dim)  # для коротких месяцев берём последний день
+-            if today.day != reset_day:
+-                continue
+-
+-            if (key.get("last_traffic_reset") or "") == month_marker:
+-                continue
+-
+-            ok = await remnawave_api.reset_user_traffic(uuid_val)
+-            if ok:
+-                rw_repo.set_key_last_traffic_reset(int(key["key_id"]), month_marker)
+-                reset_count += 1
+-                logger.info(f"Scheduler: Сброшен трафик ключа #{key.get('key_id')} (создан {created.date()})")
+-        except Exception as e:
+-            logger.error(f"Scheduler: Ошибка сброса трафика для ключа {key.get('key_id')}: {e}", exc_info=True)
+-
+-    if reset_count:
+-        logger.info(f"Scheduler: Помесячный сброс трафика — обработано ключей: {reset_count}")
+-
+-
+ async def sync_keys_with_panels():
+     logger.debug("Scheduler: Запускаю синхронизацию с Remnawave API...")
+     total_affected_records = 0
+@@ -618,8 +557,6 @@
+             else:
+                 logger.debug("Scheduler: Бот остановлен, уведомления пользователям пропущены.")
+ 
+-            await _maybe_reset_monthly_traffic()
+-
+         except Exception as e:
+             logger.error(f"Scheduler: Необработанная ошибка в основном цикле: {e}", exc_info=True)
+             
+--- a/src/shop_bot/webhook_server/app.py	2026-07-23 17:12:56.701326558 +0000
++++ b/src/shop_bot/webhook_server/app.py	2026-07-23 17:09:57.000000000 +0000
+@@ -89,7 +89,7 @@
+     "panel_login", "panel_password", "about_text", "terms_url", "privacy_url",
+     "support_user", "support_text", "channel_url", "telegram_bot_token",
+     "telegram_bot_username", "admin_telegram_id", "yookassa_shop_id",
+-    "yookassa_secret_key", "yookassa_autopay_enabled", "monthly_traffic_reset_enabled",
++    "yookassa_secret_key", "yookassa_autopay_enabled",
+     "sbp_enabled", "receipt_email", "cryptobot_token",
+     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
+     "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "trial_host_id", "trial_traffic_limit_gb", "trial_hwid_limit", "enable_referrals", "minimum_withdrawal",
+@@ -2566,7 +2566,7 @@
+                 update_setting('panel_password', request.form.get('panel_password'))
+ 
+ 
+-            checkbox_keys = ['force_subscription', 'sbp_enabled', 'yookassa_autopay_enabled', 'monthly_traffic_reset_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled', 'platega_enabled', 'platega_crypto_enabled', 'platega_payform_enabled', 'skip_email', 'enable_wal_mode', 'stealth_login_enabled', 'demo_mode_enabled']
++            checkbox_keys = ['force_subscription', 'sbp_enabled', 'yookassa_autopay_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled', 'platega_enabled', 'platega_crypto_enabled', 'platega_payform_enabled', 'skip_email', 'enable_wal_mode', 'stealth_login_enabled', 'demo_mode_enabled']
+             for checkbox_key in checkbox_keys:
+                 values = request.form.getlist(checkbox_key)
+                 value = values[-1] if values else 'false'
+@@ -3459,6 +3459,9 @@
+             if event_json.get("event") == "payment.succeeded":
+                 payment_object = event_json.get("object", {}) or {}
+                 metadata = payment_object.get("metadata", {})
++                # Реальный ID платежа YooKassa (нужен для возврата проверочного платежа при привязке карты)
++                if isinstance(metadata, dict) and payment_object.get("id"):
++                    metadata["yk_payment_id"] = str(payment_object["id"])
+ 
+                 # Сохраняем токен способа оплаты для рекуррентных списаний
+                 try:
+--- a/src/shop_bot/webhook_server/templates/settings.html	2026-07-23 17:12:56.701326558 +0000
++++ b/src/shop_bot/webhook_server/templates/settings.html	2026-07-23 17:09:57.000000000 +0000
+@@ -427,33 +427,6 @@
+                     </div>
+                 </div>
+ 
+-                <!-- Monthly Traffic Reset Card -->
+-                <div class="bg-white/5 border border-white/10 rounded-2xl p-5 shadow-xl backdrop-blur-md flex flex-col">
+-                    <div class="flex items-center justify-between gap-2 mb-4">
+-                        <div class="flex items-center gap-2">
+-                            <div class="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+-                                <span class="material-symbols-outlined text-lg">restart_alt</span>
+-                            </div>
+-                            <h4 class="text-white font-bold text-sm">Помесячный сброс трафика</h4>
+-                        </div>
+-                        <div class="flex items-center gap-2 bg-black/20 rounded-xl px-3 py-1.5 border border-white/5">
+-                            <input type="hidden" name="monthly_traffic_reset_enabled" value="false" />
+-                            <label class="relative inline-flex items-center cursor-pointer">
+-                                <input type="checkbox" name="monthly_traffic_reset_enabled" value="true" {% if
+-                                    settings.monthly_traffic_reset_enabled=='true' %}checked{% endif %} class="sr-only peer" />
+-                                <div
+-                                    class="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary">
+-                                </div>
+-                            </label>
+-                        </div>
+-                    </div>
+-                    <p class="text-white/50 text-xs leading-relaxed">
+-                        Трафик каждого ключа обнуляется раз в месяц в число, соответствующее дате создания ключа
+-                        (например, ключ создан 15-го — сброс происходит 15-го числа каждого месяца). Для коротких
+-                        месяцев берётся последний день.
+-                    </p>
+-                </div>
+-
+                 <!-- Resource Monitoring Card -->
+                 <div class="bg-white/5 border border-white/10 rounded-2xl p-5 shadow-xl backdrop-blur-md flex flex-col">
+                     <div class="flex items-center justify-between gap-2 mb-4">
+@@ -1653,7 +1626,7 @@
+                                 <div class="relative w-full group/select" tabindex="0">
+                                     {% set current_strategy = host.default_traffic_strategy or 'NO_RESET' %}
+                                     {% set strategy_labels = {'NO_RESET': 'Никогда', 'DAY': 'Ежедневно', 'WEEK':
+-                                    'Еженедельно', 'MONTH': 'Ежемесячно'} %}
++                                    'Еженедельно', 'MONTH': 'Ежемесячно', 'MONTH_ROLLING': 'Ежемесячно (по дате создания)'} %}
+                                     <div
+                                         class="w-full bg-black/20 border border-white/10 rounded-lg px-3 py-2 text-white text-xs flex items-center justify-between cursor-pointer hover:bg-white/10">
+                                         <span id="strategy_label_{{ host.host_name }}">{{
+--- a/src/shop_bot/webhook_server/templates/admin_keys.html	2026-07-23 17:02:31.000000000 +0000
++++ b/src/shop_bot/webhook_server/templates/admin_keys.html	2026-07-23 17:09:57.000000000 +0000
+@@ -646,7 +646,7 @@
+                 const trafficStrategy = opt.getAttribute('data-traffic-strategy') || 'NO_RESET';
+                 const strategyInput = document.getElementById('host_traffic_strategy');
+                 if (strategyInput) {
+-                    const labels = { 'NO_RESET': 'Никогда', 'DAY': 'Ежедневно', 'WEEK': 'Еженедельно', 'MONTH': 'Ежемесячно' };
++                    const labels = { 'NO_RESET': 'Никогда', 'DAY': 'Ежедневно', 'WEEK': 'Еженедельно', 'MONTH': 'Ежемесячно', 'MONTH_ROLLING': 'Ежемесячно (по дате создания)' };
+                     strategyInput.value = labels[trafficStrategy] || trafficStrategy;
+                 }
+             }
