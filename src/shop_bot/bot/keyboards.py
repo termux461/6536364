@@ -718,6 +718,25 @@ def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool
     return builder.as_markup()
 
 
+def create_profile_card_keyboard(card_bound: bool) -> InlineKeyboardMarkup:
+    """Клавиатура экрана «Мои карты» в профиле."""
+    builder = InlineKeyboardBuilder()
+    if card_bound:
+        builder.button(text="🗑 Отвязать карту", callback_data="autopay_unbind_profile")
+    else:
+        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data="autopay_bind_profile")
+    builder.button(text="⬅️ Назад в профиль", callback_data="show_profile")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_profile_card_button() -> InlineKeyboardButton | None:
+    """Кнопка «Мои карты» для профиля. None, если автоплатёж выключен в настройках."""
+    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
+        return None
+    return InlineKeyboardButton(text="💳 Мои карты", callback_data="card_menu")
+
+
 def create_key_info_keyboard(key_id: int, connection_string: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     layout = []
@@ -820,10 +839,13 @@ def create_profile_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=_setting_button_text("btn_topup", "💳 Пополнить баланс"), callback_data="top_up_start", **_setting_button_extra("btn_topup"))
     builder.button(text=_setting_button_text("btn_referral", "🤝 Реферальная программа"), callback_data="show_referral_program", **_setting_button_extra("btn_referral"))
+    _card_btn = get_profile_card_button()
+    if _card_btn:
+        builder.add(_card_btn)
     builder.button(text="🛠 Подключиться", callback_data="howto_vless")
     builder.button(text="🎁 Ввести промокод", callback_data="promo_uni")
     builder.button(text=_setting_button_text("btn_back_to_menu", "⬅️ Назад в меню"), callback_data="back_to_main_menu", **_setting_button_extra("btn_back_to_menu"))
-    builder.adjust(1, 1, 2, 1)
+    builder.adjust(1, 1, 1, 2, 1) if _card_btn else builder.adjust(1, 1, 2, 1)
     return builder.as_markup()
 
 def create_uni_promo_keys_keyboard(keys: list, code: str) -> InlineKeyboardMarkup:
@@ -1157,6 +1179,17 @@ def create_dynamic_keyboard(menu_type: str, user_keys: list = None, trial_availa
                         insert_at = idx
                         break
                 keyboard_rows.insert(insert_at, [autopay_btn])
+
+        # «Мои карты»: кнопка добавляется в динамическое меню профиля (конфиг кнопок в БД её не содержит)
+        if menu_type == "profile_menu":
+            card_btn = get_profile_card_button()
+            if card_btn:
+                insert_at = len(keyboard_rows)
+                for idx, row in enumerate(keyboard_rows):
+                    if any((b.callback_data or "") in ("back_to_main_menu", "show_menu") for b in row):
+                        insert_at = idx
+                        break
+                keyboard_rows.insert(insert_at, [card_btn])
 
         return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
         

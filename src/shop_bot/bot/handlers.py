@@ -2344,6 +2344,29 @@ def get_user_router() -> Router:
     # ===== Конец функции toggle_autopay_handler =====
 
     # ===== ПРИВЯЗКА КАРТЫ (10 ₽ С ВОЗВРАТОМ) =====
+    # ===== ЭКРАН «МОИ КАРТЫ» (из профиля) =====
+    async def render_card_menu(message: types.Message, user_id: int):
+        pm_id = rw_repo.get_user_payment_method_id(user_id)
+        lines = ["💳 <b>Мои карты</b>\n"]
+        if pm_id:
+            lines.append("Статус: ✅ карта привязана")
+            lines.append("\nКарта используется для автопродления подписок. Включить автопродление можно в меню каждого ключа.")
+        else:
+            lines.append("Статус: ❌ карта не привязана")
+            lines.append(f"\n💳 При привязке спишем <b>{CARD_BIND_AMOUNT_RUB:.0f} ₽</b> для проверки карты и сразу вернём их обратно.")
+        await smart_edit_message(message, "\n".join(lines), keyboards.create_profile_card_keyboard(bool(pm_id)))
+
+    @user_router.callback_query(F.data == "card_menu")
+    @anti_spam
+    @registration_required
+    async def card_menu_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+        if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
+            return await callback.answer("⚠️ Привязка карты недоступна.", show_alert=True)
+        await callback.answer()
+        await render_card_menu(callback.message, callback.from_user.id)
+    # ===== Конец функции card_menu_handler =====
+
+    # ===== ПРИВЯЗКА КАРТЫ (10 ₽ С ВОЗВРАТОМ) — из ключа или из профиля =====
     @user_router.callback_query(F.data.startswith("autopay_bind_"))
     @anti_spam
     @registration_required
@@ -2353,11 +2376,18 @@ def get_user_router() -> Router:
         shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
         if not shop_id or not secret:
             return await callback.answer("⚠️ ЮKassa не настроена.", show_alert=True)
-        try: kid = int(callback.data[len("autopay_bind_"):])
-        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
-        key = rw_repo.get_key_by_id(kid)
-        if not key or key.get('user_id') != callback.from_user.id:
-            return await callback.answer("❌ Ключ не найден.", show_alert=True)
+
+        suffix = callback.data[len("autopay_bind_"):]
+        from_profile = (suffix == "profile")
+        kid = None
+        host_name = None
+        if not from_profile:
+            try: kid = int(suffix)
+            except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
+            key = rw_repo.get_key_by_id(kid)
+            if not key or key.get('user_id') != callback.from_user.id:
+                return await callback.answer("❌ Ключ не найден.", show_alert=True)
+            host_name = key.get('host_name')
 
         await callback.answer("⏳ Создаю платёж...")
         user_id = callback.from_user.id
@@ -2369,12 +2399,13 @@ def get_user_router() -> Router:
             "price": float(amount),
             "action": "bind_card",
             "key_id": kid,
-            "host_name": key.get('host_name'),
+            "host_name": host_name,
             "plan_id": None,
             "customer_email": None,
             "payment_method": "YooKassa",
             "payment_id": payment_id,
         }
+        back_cb = "card_menu" if from_profile else f"autopay_menu_{kid}"
         try:
             create_payload_pending(payment_id, user_id, float(amount), metadata)
             description = "Привязка карты для автоплатежа (сумма будет возвращена)"
@@ -2392,26 +2423,30 @@ def get_user_router() -> Router:
             pay_obj = await create_yookassa_payment_async(payload, payment_id, shop_id, secret)
             kb = InlineKeyboardBuilder()
             kb.button(text=f"💳 Оплатить {amount:.0f} ₽", url=pay_obj["confirmation"]["confirmation_url"])
-            kb.button(text="⬅️ Назад", callback_data=f"autopay_menu_{kid}")
+            kb.button(text="⬅️ Назад", callback_data=back_cb)
             kb.adjust(1)
             await smart_edit_message(
                 callback.message,
                 f"💳 <b>Привязка карты</b>\n\nДля проверки карты будет списано <b>{amount:.0f} ₽</b> — мы сразу же вернём их на карту.\n\nПосле оплаты карта будет сохранена для автоплатежа, бот пришлёт подтверждение.",
                 kb.as_markup(),
             )
-            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты (платёж {payment_id})")
+            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты (платёж {payment_id}, из {'профиля' if from_profile else f'ключа #{kid}'})")
         except Exception as e:
             logger.error(f"Автоплатёж: ошибка создания платежа привязки карты для {user_id}: {e}", exc_info=True)
             await callback.message.answer("⚠️ ЮKassa временно не отвечает. Попробуйте позже.")
     # ===== Конец функции autopay_bind_card_handler =====
 
-    # ===== ОТВЯЗКА КАРТЫ =====
+    # ===== ОТВЯЗКА КАРТЫ — из ключа или из профиля =====
     @user_router.callback_query(F.data.startswith("autopay_unbind_"))
     @anti_spam
     @registration_required
     async def autopay_unbind_card_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
-        try: kid = int(callback.data[len("autopay_unbind_"):])
-        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
+        suffix = callback.data[len("autopay_unbind_"):]
+        from_profile = (suffix == "profile")
+        kid = None
+        if not from_profile:
+            try: kid = int(suffix)
+            except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
         user_id = callback.from_user.id
         rw_repo.set_user_payment_method_id(user_id, None)
         # Без карты рекуррентные списания невозможны — выключаем автоплатёж на всех ключах пользователя
@@ -2423,7 +2458,10 @@ def get_user_router() -> Router:
             logger.error(f"Автоплатёж: ошибка отключения автоплатежа после отвязки карты {user_id}: {e}")
         await callback.answer("🗑 Карта отвязана, автоплатёж отключён.", show_alert=True)
         logger.info(f"Автоплатёж: пользователь {user_id} отвязал карту")
-        await render_autopay_menu(callback.message, kid, user_id)
+        if from_profile:
+            await render_card_menu(callback.message, user_id)
+        else:
+            await render_autopay_menu(callback.message, kid, user_id)
     # ===== Конец функции autopay_unbind_card_handler =====
 
     # ===== НАЧАЛО ПЕРЕНОСА КЛЮЧА НА ДРУГОЙ СЕРВЕР =====
@@ -3644,9 +3682,10 @@ async def process_successful_payment(bot: Bot | None, metadata: dict) -> bool:
                         txt += "\n🔄 Теперь вы можете включить автоплатёж в меню ключа."
                 else:
                     txt = "⚠️ Оплата прошла, но сохранить карту не удалось. Обратитесь в поддержку."
-                kb = None
                 if kid:
                     kb = InlineKeyboardBuilder().button(text="🔄 К автоплатежу", callback_data=f"autopay_menu_{kid}").as_markup()
+                else:
+                    kb = InlineKeyboardBuilder().button(text="💳 Мои карты", callback_data="card_menu").as_markup()
                 try: await bot.send_message(uid, txt, reply_markup=kb)
                 except Exception: pass
             return True
