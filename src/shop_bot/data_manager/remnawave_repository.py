@@ -364,6 +364,12 @@ _LEGACY_FORWARDERS = (
     "update_other_setting",
     "get_webapp_settings",
     "update_webapp_settings",
+
+    "set_user_payment_method_id",
+    "get_user_payment_method_id",
+    "set_key_autopay",
+    "set_key_last_traffic_reset",
+    "set_key_autopay_charged",
 )
 
 for _name in _LEGACY_FORWARDERS:

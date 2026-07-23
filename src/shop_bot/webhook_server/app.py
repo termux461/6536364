@@ -89,7 +89,8 @@ ALL_SETTINGS_KEYS = [
     "panel_login", "panel_password", "about_text", "terms_url", "privacy_url",
     "support_user", "support_text", "channel_url", "telegram_bot_token",
     "telegram_bot_username", "admin_telegram_id", "yookassa_shop_id",
-    "yookassa_secret_key", "sbp_enabled", "receipt_email", "cryptobot_token",
+    "yookassa_secret_key", "yookassa_autopay_enabled", "monthly_traffic_reset_enabled",
+    "sbp_enabled", "receipt_email", "cryptobot_token",
     "heleket_merchant_id", "heleket_api_key", "domain", "referral_percentage",
     "referral_discount", "ton_wallet_address", "tonapi_key", "force_subscription", "trial_enabled", "trial_duration_days", "trial_host_id", "trial_traffic_limit_gb", "trial_hwid_limit", "enable_referrals", "minimum_withdrawal",
 
@@ -2565,7 +2566,7 @@ def create_webhook_app(bot_controller_instance):
                 update_setting('panel_password', request.form.get('panel_password'))
 
 
-            checkbox_keys = ['force_subscription', 'sbp_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled', 'platega_enabled', 'platega_crypto_enabled', 'platega_payform_enabled', 'skip_email', 'enable_wal_mode', 'stealth_login_enabled', 'demo_mode_enabled']
+            checkbox_keys = ['force_subscription', 'sbp_enabled', 'yookassa_autopay_enabled', 'monthly_traffic_reset_enabled', 'trial_enabled', 'enable_referrals', 'enable_fixed_referral_bonus', 'stars_enabled', 'yoomoney_enabled', 'monitoring_enabled', 'platega_enabled', 'platega_crypto_enabled', 'platega_payform_enabled', 'skip_email', 'enable_wal_mode', 'stealth_login_enabled', 'demo_mode_enabled']
             for checkbox_key in checkbox_keys:
                 values = request.form.getlist(checkbox_key)
                 value = values[-1] if values else 'false'
@@ -3456,8 +3457,19 @@ def create_webhook_app(bot_controller_instance):
         try:
             event_json = request.json
             if event_json.get("event") == "payment.succeeded":
-                metadata = event_json.get("object", {}).get("metadata", {})
-                
+                payment_object = event_json.get("object", {}) or {}
+                metadata = payment_object.get("metadata", {})
+
+                # Сохраняем токен способа оплаты для рекуррентных списаний
+                try:
+                    pm = payment_object.get("payment_method") or {}
+                    if pm.get("saved") and pm.get("id") and metadata.get("user_id"):
+                        from shop_bot.data_manager.database import set_user_payment_method_id
+                        set_user_payment_method_id(int(metadata["user_id"]), str(pm["id"]))
+                        logger.info(f"YooKassa: сохранён способ оплаты для пользователя {metadata['user_id']}")
+                except Exception as e:
+                    logger.error(f"YooKassa: не удалось сохранить способ оплаты: {e}")
+
                 bot = _bot_controller.get_bot_instance()
                 payment_processor = handlers.process_successful_payment
 

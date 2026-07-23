@@ -34,6 +34,13 @@ _last_speedtests_run_at: datetime | None = None
 _last_backup_run_at: datetime | None = None
 _last_resource_collect_at: datetime | None = None
 _last_resource_alert_at: dict[tuple[str, str, str], datetime] = {}
+_last_autopay_run_at: datetime | None = None
+_last_traffic_reset_run_at: datetime | None = None
+
+AUTOPAY_INTERVAL_SECONDS = 3600
+AUTOPAY_WINDOW_HOURS = 24
+AUTOPAY_MIN_RECHARGE_HOURS = 20
+TRAFFIC_RESET_INTERVAL_SECONDS = 3600
 
 def format_time_left(hours: int) -> str:
     if hours >= 24:
@@ -132,6 +139,123 @@ async def check_expiring_subscriptions(bot: Bot):
                     
         except Exception as e:
             logger.error(f"Scheduler: Ошибка обработки истечения для ключа {key.get('key_id')}: {e}")
+
+def _parse_dt(value) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    try:
+        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _days_in_month(year: int, month: int) -> int:
+    if month == 12:
+        nxt = datetime(year + 1, 1, 1)
+    else:
+        nxt = datetime(year, month + 1, 1)
+    return (nxt - timedelta(days=1)).day
+
+
+async def _maybe_process_autopayments(bot: Bot | None):
+    """Автопродление подписок с включённым автоплатежом ЮKassa за AUTOPAY_WINDOW_HOURS до истечения."""
+    global _last_autopay_run_at
+    if bot is None:
+        return
+    if (rw_repo.get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
+        return
+
+    now = get_msk_time()
+    if _last_autopay_run_at and (now - _last_autopay_run_at).total_seconds() < AUTOPAY_INTERVAL_SECONDS:
+        return
+    _last_autopay_run_at = now
+
+    from shop_bot.bot import handlers
+
+    current = now.replace(tzinfo=None)
+    processed = 0
+    for key in rw_repo.get_all_keys():
+        try:
+            if not int(key.get("autopay_enabled") or 0):
+                continue
+            if not key.get("remnawave_user_uuid"):
+                continue
+
+            expiry = _parse_dt(key.get("expiry_date") or key.get("expire_at"))
+            if not expiry:
+                continue
+            hours_left = (expiry - current).total_seconds() / 3600
+            # Продлеваем только в окне [ -6ч ; AUTOPAY_WINDOW_HOURS ] от момента истечения
+            if hours_left > AUTOPAY_WINDOW_HOURS or hours_left < -6:
+                continue
+
+            # Защита от повторного списания
+            last_charge = _parse_dt(key.get("autopay_last_charge"))
+            if last_charge and (current - last_charge).total_seconds() / 3600 < AUTOPAY_MIN_RECHARGE_HOURS:
+                continue
+
+            ok = await handlers.charge_key_autopay(bot, key)
+            if ok:
+                processed += 1
+        except Exception as e:
+            logger.error(f"Scheduler: Ошибка автоплатежа для ключа {key.get('key_id')}: {e}", exc_info=True)
+
+    if processed:
+        logger.info(f"Scheduler: Автоплатёж — инициировано списаний: {processed}")
+
+
+async def _maybe_reset_monthly_traffic():
+    """Помесячный сброс трафика по числу создания ключа."""
+    global _last_traffic_reset_run_at
+    if (rw_repo.get_setting("monthly_traffic_reset_enabled") or "false").strip().lower() != "true":
+        return
+
+    now = get_msk_time()
+    if _last_traffic_reset_run_at and (now - _last_traffic_reset_run_at).total_seconds() < TRAFFIC_RESET_INTERVAL_SECONDS:
+        return
+    _last_traffic_reset_run_at = now
+
+    today = now.replace(tzinfo=None)
+    month_marker = f"{today.year}-{today.month:02d}"
+    dim = _days_in_month(today.year, today.month)
+    current_expire_guard = today
+    reset_count = 0
+
+    for key in rw_repo.get_all_keys():
+        try:
+            uuid_val = key.get("remnawave_user_uuid")
+            if not uuid_val:
+                continue
+
+            created = _parse_dt(key.get("created_date") or key.get("created_at"))
+            if not created:
+                continue
+
+            # Не сбрасываем трафик у истёкших ключей
+            expiry = _parse_dt(key.get("expiry_date") or key.get("expire_at"))
+            if expiry and expiry < current_expire_guard:
+                continue
+
+            reset_day = min(created.day, dim)  # для коротких месяцев берём последний день
+            if today.day != reset_day:
+                continue
+
+            if (key.get("last_traffic_reset") or "") == month_marker:
+                continue
+
+            ok = await remnawave_api.reset_user_traffic(uuid_val)
+            if ok:
+                rw_repo.set_key_last_traffic_reset(int(key["key_id"]), month_marker)
+                reset_count += 1
+                logger.info(f"Scheduler: Сброшен трафик ключа #{key.get('key_id')} (создан {created.date()})")
+        except Exception as e:
+            logger.error(f"Scheduler: Ошибка сброса трафика для ключа {key.get('key_id')}: {e}", exc_info=True)
+
+    if reset_count:
+        logger.info(f"Scheduler: Помесячный сброс трафика — обработано ключей: {reset_count}")
+
 
 async def sync_keys_with_panels():
     logger.debug("Scheduler: Запускаю синхронизацию с Remnawave API...")
@@ -488,10 +612,13 @@ async def periodic_subscription_check(bot_controller: BotController):
                 bot = bot_controller.get_bot_instance()
                 if bot:
                     await check_expiring_subscriptions(bot)
+                    await _maybe_process_autopayments(bot)
                 else:
                     logger.warning("Scheduler: Бот помечен как запущенный, но экземпляр недоступен.")
             else:
                 logger.debug("Scheduler: Бот остановлен, уведомления пользователям пропущены.")
+
+            await _maybe_reset_monthly_traffic()
 
         except Exception as e:
             logger.error(f"Scheduler: Необработанная ошибка в основном цикле: {e}", exc_info=True)

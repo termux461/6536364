@@ -7,7 +7,7 @@ from datetime import datetime
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from shop_bot.data_manager.remnawave_repository import get_setting
+from shop_bot.data_manager.remnawave_repository import get_setting, get_key_by_id
 from shop_bot.data_manager.database import get_button_configs
 from shop_bot.config import get_msk_time
 
@@ -708,11 +708,23 @@ def create_key_info_keyboard(key_id: int, connection_string: str | None = None) 
     builder.button(text="📖 Инструкция", callback_data=f"howto_vless_{key_id}")
     builder.button(text="📝 Комментарий", callback_data=f"key_comments_{key_id}")
     layout.append(2)
-    
+
+    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() == "true":
+        try:
+            _key = get_key_by_id(key_id) or {}
+            _on = bool(int(_key.get("autopay_enabled") or 0))
+        except Exception:
+            _on = False
+        if _on:
+            builder.button(text="🔄 Автоплатёж: вкл ✅", callback_data=f"autopay_off_{key_id}")
+        else:
+            builder.button(text="🔄 Автоплатёж: выкл", callback_data=f"autopay_on_{key_id}")
+        layout.append(1)
+
     builder.button(text="⬅️ Назад к списку ключей", callback_data="manage_keys")
     layout.append(1)
-    
-    builder.adjust(*layout) 
+
+    builder.adjust(*layout)
     return builder.as_markup()
 
 def create_qr_keyboard(key_id: int) -> InlineKeyboardMarkup:
