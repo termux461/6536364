@@ -1,0 +1,250 @@
+diff --git a/src/shop_bot/bot/handlers.py b/src/shop_bot/bot/handlers.py
+index 2333e84..4db2c29 100644
+--- a/src/shop_bot/bot/handlers.py
++++ b/src/shop_bot/bot/handlers.py
+@@ -344,7 +344,8 @@ async def create_yookassa_refund_async(yk_payment_id: str, amount: float, idempo
+ 
+ 
+ async def create_yookassa_recurring_payment_async(payload: dict, idempotence_key: str, shop_id: str, secret_key: str, timeout_seconds: int = 20) -> dict:
+-    """Рекуррентное (автоматическое) списание по сохранённому payment_method_id — без подтверждения пользователем."""
++    """Рекуррентное (автоматическое) списание по сохранённому payment_method_id — без подтверждения пользователем.
++    Idempotence-Key фиксирован, поэтому повтор при сетевой ошибке безопасен (ЮKassa не создаст второй платёж)."""
+     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=12, sock_read=timeout_seconds)
+     headers = {"Idempotence-Key": str(idempotence_key)}
+     auth = aiohttp.BasicAuth(str(shop_id), str(secret_key))
+@@ -352,11 +353,22 @@ async def create_yookassa_recurring_payment_async(payload: dict, idempotence_key
+     if isinstance(api_payload.get("metadata"), dict):
+         api_payload["metadata"] = {str(k): "" if v is None else str(v) for k, v in api_payload["metadata"].items()}
+     async with aiohttp.ClientSession(timeout=timeout, auth=auth) as session:
+-        async with session.post("https://api.yookassa.ru/v3/payments", json=api_payload, headers=headers) as response:
+-            raw = await response.text()
+-            if response.status >= 400:
+-                raise RuntimeError(f"YooKassa HTTP {response.status}: {raw[:500]}")
+-            return json.loads(raw or "{}")
++        last_error = None
++        for attempt in range(3):
++            try:
++                async with session.post("https://api.yookassa.ru/v3/payments", json=api_payload, headers=headers) as response:
++                    raw = await response.text()
++                    if response.status >= 400:
++                        raise RuntimeError(f"YooKassa HTTP {response.status}: {raw[:500]}")
++                    return json.loads(raw or "{}")
++            except (aiohttp.ClientConnectionError, aiohttp.ServerTimeoutError, asyncio.TimeoutError) as exc:
++                last_error = exc
++                if attempt == 2:
++                    break
++                await asyncio.sleep(1 + attempt)
++        if last_error is not None:
++            raise last_error
++        raise RuntimeError("YooKassa: не удалось выполнить рекуррентное списание")
+ 
+ # ===== ПОЛУЧЕНИЕ КЛАВИАТУРЫ ОПЛАТЫ =====
+ # Генерирует соответствующую inline-клавиатуру в зависимости от выбранного метода платежа
+@@ -2332,6 +2344,29 @@ def get_user_router() -> Router:
+     # ===== Конец функции toggle_autopay_handler =====
+ 
+     # ===== ПРИВЯЗКА КАРТЫ (10 ₽ С ВОЗВРАТОМ) =====
++    # ===== ЭКРАН «МОИ КАРТЫ» (из профиля) =====
++    async def render_card_menu(message: types.Message, user_id: int):
++        pm_id = rw_repo.get_user_payment_method_id(user_id)
++        lines = ["💳 <b>Мои карты</b>\n"]
++        if pm_id:
++            lines.append("Статус: ✅ карта привязана")
++            lines.append("\nКарта используется для автопродления подписок. Включить автопродление можно в меню каждого ключа.")
++        else:
++            lines.append("Статус: ❌ карта не привязана")
++            lines.append(f"\n💳 При привязке спишем <b>{CARD_BIND_AMOUNT_RUB:.0f} ₽</b> для проверки карты и сразу вернём их обратно.")
++        await smart_edit_message(message, "\n".join(lines), keyboards.create_profile_card_keyboard(bool(pm_id)))
++
++    @user_router.callback_query(F.data == "card_menu")
++    @anti_spam
++    @registration_required
++    async def card_menu_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
++        if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
++            return await callback.answer("⚠️ Привязка карты недоступна.", show_alert=True)
++        await callback.answer()
++        await render_card_menu(callback.message, callback.from_user.id)
++    # ===== Конец функции card_menu_handler =====
++
++    # ===== ПРИВЯЗКА КАРТЫ (10 ₽ С ВОЗВРАТОМ) — из ключа или из профиля =====
+     @user_router.callback_query(F.data.startswith("autopay_bind_"))
+     @anti_spam
+     @registration_required
+@@ -2341,11 +2376,18 @@ def get_user_router() -> Router:
+         shop_id, secret = get_setting("yookassa_shop_id"), get_setting("yookassa_secret_key")
+         if not shop_id or not secret:
+             return await callback.answer("⚠️ ЮKassa не настроена.", show_alert=True)
+-        try: kid = int(callback.data[len("autopay_bind_"):])
+-        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
+-        key = rw_repo.get_key_by_id(kid)
+-        if not key or key.get('user_id') != callback.from_user.id:
+-            return await callback.answer("❌ Ключ не найден.", show_alert=True)
++
++        suffix = callback.data[len("autopay_bind_"):]
++        from_profile = (suffix == "profile")
++        kid = None
++        host_name = None
++        if not from_profile:
++            try: kid = int(suffix)
++            except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
++            key = rw_repo.get_key_by_id(kid)
++            if not key or key.get('user_id') != callback.from_user.id:
++                return await callback.answer("❌ Ключ не найден.", show_alert=True)
++            host_name = key.get('host_name')
+ 
+         await callback.answer("⏳ Создаю платёж...")
+         user_id = callback.from_user.id
+@@ -2357,12 +2399,13 @@ def get_user_router() -> Router:
+             "price": float(amount),
+             "action": "bind_card",
+             "key_id": kid,
+-            "host_name": key.get('host_name'),
++            "host_name": host_name,
+             "plan_id": None,
+             "customer_email": None,
+             "payment_method": "YooKassa",
+             "payment_id": payment_id,
+         }
++        back_cb = "card_menu" if from_profile else f"autopay_menu_{kid}"
+         try:
+             create_payload_pending(payment_id, user_id, float(amount), metadata)
+             description = "Привязка карты для автоплатежа (сумма будет возвращена)"
+@@ -2380,26 +2423,30 @@ def get_user_router() -> Router:
+             pay_obj = await create_yookassa_payment_async(payload, payment_id, shop_id, secret)
+             kb = InlineKeyboardBuilder()
+             kb.button(text=f"💳 Оплатить {amount:.0f} ₽", url=pay_obj["confirmation"]["confirmation_url"])
+-            kb.button(text="⬅️ Назад", callback_data=f"autopay_menu_{kid}")
++            kb.button(text="⬅️ Назад", callback_data=back_cb)
+             kb.adjust(1)
+             await smart_edit_message(
+                 callback.message,
+                 f"💳 <b>Привязка карты</b>\n\nДля проверки карты будет списано <b>{amount:.0f} ₽</b> — мы сразу же вернём их на карту.\n\nПосле оплаты карта будет сохранена для автоплатежа, бот пришлёт подтверждение.",
+                 kb.as_markup(),
+             )
+-            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты (платёж {payment_id})")
++            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты (платёж {payment_id}, из {'профиля' if from_profile else f'ключа #{kid}'})")
+         except Exception as e:
+             logger.error(f"Автоплатёж: ошибка создания платежа привязки карты для {user_id}: {e}", exc_info=True)
+             await callback.message.answer("⚠️ ЮKassa временно не отвечает. Попробуйте позже.")
+     # ===== Конец функции autopay_bind_card_handler =====
+ 
+-    # ===== ОТВЯЗКА КАРТЫ =====
++    # ===== ОТВЯЗКА КАРТЫ — из ключа или из профиля =====
+     @user_router.callback_query(F.data.startswith("autopay_unbind_"))
+     @anti_spam
+     @registration_required
+     async def autopay_unbind_card_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
+-        try: kid = int(callback.data[len("autopay_unbind_"):])
+-        except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
++        suffix = callback.data[len("autopay_unbind_"):]
++        from_profile = (suffix == "profile")
++        kid = None
++        if not from_profile:
++            try: kid = int(suffix)
++            except ValueError: return await callback.answer("⚠️ Ошибка ID.", show_alert=True)
+         user_id = callback.from_user.id
+         rw_repo.set_user_payment_method_id(user_id, None)
+         # Без карты рекуррентные списания невозможны — выключаем автоплатёж на всех ключах пользователя
+@@ -2411,7 +2458,10 @@ def get_user_router() -> Router:
+             logger.error(f"Автоплатёж: ошибка отключения автоплатежа после отвязки карты {user_id}: {e}")
+         await callback.answer("🗑 Карта отвязана, автоплатёж отключён.", show_alert=True)
+         logger.info(f"Автоплатёж: пользователь {user_id} отвязал карту")
+-        await render_autopay_menu(callback.message, kid, user_id)
++        if from_profile:
++            await render_card_menu(callback.message, user_id)
++        else:
++            await render_autopay_menu(callback.message, kid, user_id)
+     # ===== Конец функции autopay_unbind_card_handler =====
+ 
+     # ===== НАЧАЛО ПЕРЕНОСА КЛЮЧА НА ДРУГОЙ СЕРВЕР =====
+@@ -3632,9 +3682,10 @@ async def process_successful_payment(bot: Bot | None, metadata: dict) -> bool:
+                         txt += "\n🔄 Теперь вы можете включить автоплатёж в меню ключа."
+                 else:
+                     txt = "⚠️ Оплата прошла, но сохранить карту не удалось. Обратитесь в поддержку."
+-                kb = None
+                 if kid:
+                     kb = InlineKeyboardBuilder().button(text="🔄 К автоплатежу", callback_data=f"autopay_menu_{kid}").as_markup()
++                else:
++                    kb = InlineKeyboardBuilder().button(text="💳 Мои карты", callback_data="card_menu").as_markup()
+                 try: await bot.send_message(uid, txt, reply_markup=kb)
+                 except Exception: pass
+             return True
+@@ -4040,8 +4091,13 @@ async def charge_key_autopay(bot: Bot | None, key: dict) -> bool:
+             await process_successful_payment(bot, metadata)
+         except Exception as e:
+             logger.error(f"Автоплатёж: ошибка обработки успешного списания ключа #{key_id}: {e}")
+-    elif status == "canceled":
+-        logger.warning(f"Автоплатёж: списание отклонено для ключа #{key_id} (статус={status})")
++    elif status in ("pending", "waiting_for_capture"):
++        # Платёж создан, но ещё не завершён (напр. требуется автоматическое подтверждение).
++        # Финальный статус придёт вебхуком payment.succeeded — там ключ и продлится.
++        logger.info(f"Автоплатёж: списание по ключу #{key_id} в обработке (статус={status}), ждём вебхук")
++    else:
++        # canceled / None / прочее — списание не удалось
++        logger.warning(f"Автоплатёж: списание не удалось для ключа #{key_id} (статус={status})")
+         await _notify_autopay_failure(bot, user_id, key_id, price, reason="card_declined")
+     return True
+ # ===== Конец функции charge_key_autopay =====
+diff --git a/src/shop_bot/bot/keyboards.py b/src/shop_bot/bot/keyboards.py
+index b35d162..5dc71c0 100644
+--- a/src/shop_bot/bot/keyboards.py
++++ b/src/shop_bot/bot/keyboards.py
+@@ -718,6 +718,25 @@ def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool
+     return builder.as_markup()
+ 
+ 
++def create_profile_card_keyboard(card_bound: bool) -> InlineKeyboardMarkup:
++    """Клавиатура экрана «Мои карты» в профиле."""
++    builder = InlineKeyboardBuilder()
++    if card_bound:
++        builder.button(text="🗑 Отвязать карту", callback_data="autopay_unbind_profile")
++    else:
++        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data="autopay_bind_profile")
++    builder.button(text="⬅️ Назад в профиль", callback_data="show_profile")
++    builder.adjust(1)
++    return builder.as_markup()
++
++
++def get_profile_card_button() -> InlineKeyboardButton | None:
++    """Кнопка «Мои карты» для профиля. None, если автоплатёж выключен в настройках."""
++    if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
++        return None
++    return InlineKeyboardButton(text="💳 Мои карты", callback_data="card_menu")
++
++
+ def create_key_info_keyboard(key_id: int, connection_string: str | None = None) -> InlineKeyboardMarkup:
+     builder = InlineKeyboardBuilder()
+     layout = []
+@@ -820,10 +839,13 @@ def create_profile_keyboard() -> InlineKeyboardMarkup:
+     builder = InlineKeyboardBuilder()
+     builder.button(text=_setting_button_text("btn_topup", "💳 Пополнить баланс"), callback_data="top_up_start", **_setting_button_extra("btn_topup"))
+     builder.button(text=_setting_button_text("btn_referral", "🤝 Реферальная программа"), callback_data="show_referral_program", **_setting_button_extra("btn_referral"))
++    _card_btn = get_profile_card_button()
++    if _card_btn:
++        builder.add(_card_btn)
+     builder.button(text="🛠 Подключиться", callback_data="howto_vless")
+     builder.button(text="🎁 Ввести промокод", callback_data="promo_uni")
+     builder.button(text=_setting_button_text("btn_back_to_menu", "⬅️ Назад в меню"), callback_data="back_to_main_menu", **_setting_button_extra("btn_back_to_menu"))
+-    builder.adjust(1, 1, 2, 1)
++    builder.adjust(1, 1, 1, 2, 1) if _card_btn else builder.adjust(1, 1, 2, 1)
+     return builder.as_markup()
+ 
+ def create_uni_promo_keys_keyboard(keys: list, code: str) -> InlineKeyboardMarkup:
+@@ -1158,6 +1180,17 @@ def create_dynamic_keyboard(menu_type: str, user_keys: list = None, trial_availa
+                         break
+                 keyboard_rows.insert(insert_at, [autopay_btn])
+ 
++        # «Мои карты»: кнопка добавляется в динамическое меню профиля (конфиг кнопок в БД её не содержит)
++        if menu_type == "profile_menu":
++            card_btn = get_profile_card_button()
++            if card_btn:
++                insert_at = len(keyboard_rows)
++                for idx, row in enumerate(keyboard_rows):
++                    if any((b.callback_data or "") in ("back_to_main_menu", "show_menu") for b in row):
++                        insert_at = idx
++                        break
++                keyboard_rows.insert(insert_at, [card_btn])
++
+         return InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+         
+     except Exception as e:
