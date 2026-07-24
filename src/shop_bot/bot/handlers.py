@@ -325,13 +325,14 @@ async def create_yookassa_payment_async(payload: dict, idempotence_key: str, sho
         raise RuntimeError("YooKassa: не удалось создать платеж")
 
 
-async def create_yookassa_payment_method_async(shop_id: str, secret_key: str, return_url: str, idempotence_key: str, timeout_seconds: int = 20) -> dict:
-    """Привязка карты БЕЗ списания (нулевая сумма) через POST /v3/payment_methods.
+async def create_yookassa_payment_method_async(shop_id: str, secret_key: str, return_url: str, idempotence_key: str, method_type: str = "bank_card", timeout_seconds: int = 20) -> dict:
+    """Привязка способа оплаты БЕЗ списания (нулевая сумма) через POST /v3/payment_methods.
+    method_type: "bank_card" (карта) или "sbp" (СБП).
     Возвращает объект способа оплаты с confirmation_url (для редиректа) и id."""
     timeout = aiohttp.ClientTimeout(total=timeout_seconds, connect=12, sock_read=timeout_seconds)
     headers = {"Idempotence-Key": str(idempotence_key)}
     auth = aiohttp.BasicAuth(str(shop_id), str(secret_key))
-    api_payload = {"type": "bank_card", "confirmation": {"type": "redirect", "return_url": str(return_url)}}
+    api_payload = {"type": str(method_type), "confirmation": {"type": "redirect", "return_url": str(return_url)}}
     async with aiohttp.ClientSession(timeout=timeout, auth=auth) as session:
         async with session.post("https://api.yookassa.ru/v3/payment_methods", json=api_payload, headers=headers) as response:
             raw = await response.text()
@@ -2271,19 +2272,18 @@ def get_user_router() -> Router:
         await refresh_key_info_internal(bot=bot, chat_id=callback.message.chat.id, message_to_edit=callback.message, key_id=kid, user_id=callback.from_user.id)
     # ===== Конец функции show_key_handler =====
 
-    # ===== МЕНЮ АВТОПЛАТЕЖА ПО КЛЮЧУ =====
+    # ===== МЕНЮ АВТОПРОДЛЕНИЯ ПО КЛЮЧУ =====
     async def render_autopay_menu(message: types.Message, kid: int, user_id: int):
         key = rw_repo.get_key_by_id(kid) or {}
         pm_id = rw_repo.get_user_payment_method_id(user_id)
-        autopay_on = bool(int(key.get("autopay_enabled") or 0))
         has_params = bool(key.get('autopay_plan_id') and key.get('autopay_price') and key.get('autopay_months'))
         balance = 0.0
         try: balance = float(get_balance(user_id) or 0)
         except Exception: pass
 
-        lines = [f"🔄 <b>Автоплатёж для ключа #{kid}</b>\n"]
-        lines.append(f"Статус: {'✅ включён' if autopay_on else '🚫 выключен'}")
-        lines.append(f"Карта: {'💳 привязана' if pm_id else '❌ не привязана'}")
+        lines = [f"🔄 <b>Автопродление ключа #{kid}</b>\n"]
+        lines.append("Статус: ✅ <b>всегда включено</b> (списывается с баланса)")
+        lines.append(f"Запасной способ: {'💳 привязан' if pm_id else '❌ не привязан'}")
         lines.append(f"Баланс: <code>{balance:.2f} RUB</code>")
         if has_params:
             _months, _price = int(key['autopay_months']), float(key['autopay_price'])
@@ -2296,13 +2296,12 @@ def get_user_router() -> Router:
                 pass
             lines.append(f"Продление: <b>{_months} мес. за {_price:.2f} RUB</b>")
         else:
-            lines.append("Продление: <i>параметры появятся после первой оплаты подписки</i>")
-        lines.append("\nЗа сутки до окончания подписки бот продлит её автоматически: сначала спишет с баланса, а если средств не хватит — с привязанной карты.")
-        lines.append("Автопродление можно включить и без карты — тогда оно работает только с баланса.")
+            lines.append("Продление: <i>параметры появятся после первой оплаты подписки через бота</i>")
+        lines.append("\nЗа сутки до окончания подписки бот продлит её автоматически: сначала спишет с баланса, а если средств не хватит — со привязанной карты/СБП.")
         if not pm_id:
-            lines.append("\n💳 Привязка карты (необязательно) — <b>бесплатно, без списания</b>.")
+            lines.append("\n💳 Привязка карты или СБП (необязательно) — <b>бесплатно, без списания</b>. Нужна как запас, если не хватит баланса.")
 
-        kb = keyboards.create_autopay_menu_keyboard(kid, autopay_on=autopay_on, card_bound=bool(pm_id), can_enable=has_params)
+        kb = keyboards.create_autopay_menu_keyboard(kid, card_bound=bool(pm_id))
         await smart_edit_message(message, "\n".join(lines), kb)
 
     @user_router.callback_query(F.data.startswith("autopay_menu_"))
@@ -2377,8 +2376,8 @@ def get_user_router() -> Router:
         await render_card_menu(callback.message, callback.from_user.id)
     # ===== Конец функции card_menu_handler =====
 
-    # ===== ПРИВЯЗКА КАРТЫ БЕЗ СПИСАНИЯ (нулевая сумма) — из ключа или из профиля =====
-    @user_router.callback_query(F.data.startswith("autopay_bind_"))
+    # ===== ПРИВЯЗКА КАРТЫ/СБП БЕЗ СПИСАНИЯ (нулевая сумма) — из ключа или из профиля =====
+    @user_router.callback_query(F.data.startswith("autopay_bind_") | F.data.startswith("autopay_sbp_"))
     @anti_spam
     @registration_required
     async def autopay_bind_card_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
@@ -2388,7 +2387,10 @@ def get_user_router() -> Router:
         if not shop_id or not secret:
             return await callback.answer("⚠️ ЮKassa не настроена.", show_alert=True)
 
-        suffix = callback.data[len("autopay_bind_"):]
+        is_sbp = callback.data.startswith("autopay_sbp_")
+        method_type = "sbp" if is_sbp else "bank_card"
+        method_name = "СБП" if is_sbp else "карту"
+        suffix = callback.data[len("autopay_sbp_" if is_sbp else "autopay_bind_"):]
         from_profile = (suffix == "profile")
         kid = None
         if not from_profile:
@@ -2398,7 +2400,7 @@ def get_user_router() -> Router:
             if not key or key.get('user_id') != callback.from_user.id:
                 return await callback.answer("❌ Ключ не найден.", show_alert=True)
 
-        await callback.answer("⏳ Готовлю привязку карты...")
+        await callback.answer(f"⏳ Готовлю привязку ({method_name})...")
         user_id = callback.from_user.id
         ctx = "p" if from_profile else str(kid)
         back_cb = "card_menu" if from_profile else f"autopay_menu_{kid}"
@@ -2407,6 +2409,7 @@ def get_user_router() -> Router:
                 shop_id, secret,
                 return_url=f"https://t.me/{TELEGRAM_BOT_USERNAME}",
                 idempotence_key=str(uuid.uuid4()),
+                method_type=method_type,
             )
             pm_id = pm_obj.get("id")
             conf_url = (pm_obj.get("confirmation") or {}).get("confirmation_url")
@@ -2414,23 +2417,28 @@ def get_user_router() -> Router:
                 logger.error(f"Автоплатёж: ЮKassa не вернула confirmation_url для привязки карты {user_id}: {pm_obj}")
                 return await callback.message.answer("⚠️ Не удалось начать привязку карты. Попробуйте позже.")
 
+            btn_bind = "🏦 Привязать СБП" if is_sbp else "💳 Привязать карту"
             kb = InlineKeyboardBuilder()
-            kb.button(text="💳 Привязать карту", url=conf_url)
-            kb.button(text="✅ Я привязал(а) карту", callback_data=f"cardchk:{pm_id}:{ctx}")
+            kb.button(text=btn_bind, url=conf_url)
+            kb.button(text="✅ Я привязал(а)", callback_data=f"cardchk:{pm_id}:{ctx}")
             kb.button(text="⬅️ Назад", callback_data=back_cb)
             kb.adjust(1)
             await smart_edit_message(
                 callback.message,
-                "💳 <b>Привязка карты</b>\n\n"
-                "Нажмите <b>«Привязать карту»</b> и введите данные карты на защищённой форме ЮKassa.\n"
+                f"💳 <b>Привязка ({method_name})</b>\n\n"
+                f"Нажмите <b>«{btn_bind}»</b> и подтвердите привязку на защищённой форме ЮKassa.\n"
                 "💰 <b>Деньги не спишутся</b> — это проверочная привязка для будущих автосписаний.\n\n"
-                "После привязки вернитесь в бот и нажмите <b>«Я привязал(а) карту»</b>.",
+                "После привязки вернитесь в бот и нажмите <b>«Я привязал(а)»</b>.",
                 kb.as_markup(),
             )
-            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку карты без списания (pm {pm_id}, из {'профиля' if from_profile else f'ключа #{kid}'})")
+            logger.info(f"Автоплатёж: пользователь {user_id} начал привязку {method_type} без списания (pm {pm_id}, из {'профиля' if from_profile else f'ключа #{kid}'})")
         except Exception as e:
-            logger.error(f"Автоплатёж: ошибка создания привязки карты для {user_id}: {e}", exc_info=True)
-            await callback.message.answer("⚠️ ЮKassa временно не отвечает. Попробуйте позже.")
+            logger.error(f"Автоплатёж: ошибка создания привязки {method_type} для {user_id}: {e}", exc_info=True)
+            emsg = str(e)
+            if "403" in emsg and ("recurring" in emsg.lower() or "sbp" in emsg.lower()):
+                await callback.message.answer("⚠️ Автоплатежи по СБП ещё не подключены у магазина в ЮKassa. Пока доступна привязка карты.")
+            else:
+                await callback.message.answer("⚠️ ЮKassa временно не отвечает. Попробуйте позже.")
     # ===== Конец функции autopay_bind_card_handler =====
 
     # ===== ПРОВЕРКА СТАТУСА ПРИВЯЗКИ КАРТЫ =====
@@ -3876,17 +3884,15 @@ async def process_successful_payment(bot: Bot | None, metadata: dict) -> bool:
 
             update_user_stats(uid, price, months)
 
-            # Автопродление: сохраняем параметры тарифа и включаем автопродление,
-            # если функция активна в настройках (работает с баланса; карта — запасной способ).
+            # Автопродление всегда включено: сохраняем параметры тарифа на ключе.
+            # Планировщик продлит на столько месяцев, сколько куплено (autopay_months),
+            # с баланса, а при нехватке — рекуррентом по привязанной карте/СБП.
             if plan_id and months:
                 try:
-                    autopay_on = (get_setting("yookassa_autopay_enabled") or "false").strip().lower() == "true"
-                    enable = True if autopay_on else None
-                    rw_repo.set_key_autopay(kid, enabled=enable, plan_id=plan_id, price=float(price), months=months)
-                    if enable:
-                        logger.info(f"Автопродление: включено для ключа #{kid} пользователя {uid}")
+                    rw_repo.set_key_autopay(kid, enabled=True, plan_id=plan_id, price=float(price), months=months)
+                    logger.info(f"Автопродление: параметры сохранены для ключа #{kid} пользователя {uid} ({months} мес.)")
                 except Exception as e:
-                    logger.error(f"Автоплатёж: не удалось сохранить параметры для ключа #{kid}: {e}")
+                    logger.error(f"Автопродление: не удалось сохранить параметры для ключа #{kid}: {e}")
 
             # Подготовка метаданных для истории
             tx_meta = dict(metadata or {})

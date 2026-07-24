@@ -691,28 +691,21 @@ def create_keys_management_keyboard(keys: list) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 def get_autopay_button(key_id: int) -> InlineKeyboardButton | None:
-    """Кнопка меню автоплатежа для ключа. None, если автоплатёж выключен в настройках."""
+    """Кнопка меню автопродления для ключа. None, если автопродление выключено в настройках.
+    Автопродление всегда включено (с баланса) — кнопка открывает меню со статусом и привязкой карты/СБП."""
     if (get_setting("yookassa_autopay_enabled") or "false").strip().lower() != "true":
         return None
-    try:
-        _key = get_key_by_id(key_id) or {}
-        _on = bool(int(_key.get("autopay_enabled") or 0))
-    except Exception:
-        _on = False
-    text = "🔄 Автоплатёж: вкл ✅" if _on else "🔄 Автоплатёж: выкл"
-    return InlineKeyboardButton(text=text, callback_data=f"autopay_menu_{key_id}")
+    return InlineKeyboardButton(text="🔄 Автопродление ✅", callback_data=f"autopay_menu_{key_id}")
 
 
-def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool, can_enable: bool) -> InlineKeyboardMarkup:
+def create_autopay_menu_keyboard(key_id: int, card_bound: bool) -> InlineKeyboardMarkup:
+    # Автопродление всегда включено (с баланса). Кнопки — только привязка/отвязка способа оплаты для запаса.
     builder = InlineKeyboardBuilder()
-    if autopay_on:
-        builder.button(text="🚫 Выключить автопродление", callback_data=f"autopay_off_{key_id}")
-    elif can_enable:
-        builder.button(text="✅ Включить автопродление", callback_data=f"autopay_on_{key_id}")
     if card_bound:
-        builder.button(text="🗑 Отвязать карту", callback_data=f"autopay_unbind_{key_id}")
+        builder.button(text="🗑 Отвязать способ оплаты", callback_data=f"autopay_unbind_{key_id}")
     else:
         builder.button(text="💳 Привязать карту (бесплатно)", callback_data=f"autopay_bind_{key_id}")
+        builder.button(text="🏦 Привязать СБП (бесплатно)", callback_data=f"autopay_sbp_{key_id}")
     builder.button(text="⬅️ Назад к ключу", callback_data=f"show_key_{key_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -722,9 +715,10 @@ def create_profile_card_keyboard(card_bound: bool) -> InlineKeyboardMarkup:
     """Клавиатура экрана «Мои карты» в профиле."""
     builder = InlineKeyboardBuilder()
     if card_bound:
-        builder.button(text="🗑 Отвязать карту", callback_data="autopay_unbind_profile")
+        builder.button(text="🗑 Отвязать способ оплаты", callback_data="autopay_unbind_profile")
     else:
         builder.button(text="💳 Привязать карту (бесплатно)", callback_data="autopay_bind_profile")
+        builder.button(text="🏦 Привязать СБП (бесплатно)", callback_data="autopay_sbp_profile")
     builder.button(text="⬅️ Назад в профиль", callback_data="show_profile")
     builder.adjust(1)
     return builder.as_markup()

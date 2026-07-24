@@ -168,7 +168,9 @@ async def _maybe_process_autopayments(bot: Bot | None):
     processed = 0
     for key in rw_repo.get_all_keys():
         try:
-            if not int(key.get("autopay_enabled") or 0):
+            # Автопродление всегда включено: обрабатываем любой ключ, купленный через бота
+            # (есть сохранённые параметры продления). Отдельный тумблер не требуется.
+            if not (key.get("autopay_price") and key.get("autopay_months") and key.get("autopay_plan_id")):
                 continue
             if not key.get("remnawave_user_uuid"):
                 continue
