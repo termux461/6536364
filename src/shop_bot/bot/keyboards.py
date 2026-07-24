@@ -712,7 +712,7 @@ def create_autopay_menu_keyboard(key_id: int, autopay_on: bool, card_bound: bool
     if card_bound:
         builder.button(text="🗑 Отвязать карту", callback_data=f"autopay_unbind_{key_id}")
     else:
-        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data=f"autopay_bind_{key_id}")
+        builder.button(text="💳 Привязать карту (бесплатно)", callback_data=f"autopay_bind_{key_id}")
     builder.button(text="⬅️ Назад к ключу", callback_data=f"show_key_{key_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -724,7 +724,7 @@ def create_profile_card_keyboard(card_bound: bool) -> InlineKeyboardMarkup:
     if card_bound:
         builder.button(text="🗑 Отвязать карту", callback_data="autopay_unbind_profile")
     else:
-        builder.button(text="💳 Привязать карту (10 ₽, вернём)", callback_data="autopay_bind_profile")
+        builder.button(text="💳 Привязать карту (бесплатно)", callback_data="autopay_bind_profile")
     builder.button(text="⬅️ Назад в профиль", callback_data="show_profile")
     builder.adjust(1)
     return builder.as_markup()
