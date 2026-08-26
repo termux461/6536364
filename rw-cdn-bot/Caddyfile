@@ -1,0 +1,15 @@
+# Only the webhook paths are exposed. Everything else returns 404 — the bot itself talks to
+# Telegram by long polling and needs no inbound traffic.
+{$BOT_PUBLIC_DOMAIN} {
+	handle /webhooks/* {
+		reverse_proxy bot:8080
+	}
+
+	handle /healthz {
+		reverse_proxy bot:8080
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

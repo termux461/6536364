@@ -1,0 +1,28 @@
+# TLS without nginx: Caddy gets and renews the certificate on its own.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+#
+# Requires: BOT_PUBLIC_DOMAIN in .env, an A record pointing at this host, ports 80 and 443
+# free. Nothing else — no certbot, no cron, no vhost file.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      BOT_PUBLIC_DOMAIN: ${BOT_PUBLIC_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - bot
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy-data:
+  caddy-config:

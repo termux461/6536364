@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rw-cdn-setup-bot"
+version = "1.0.0"
+description = "Telegram bot: sale and automatic deployment of Remnawave + Yandex Cloud CDN + XHTTP"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.13,<4",
+    "aiohttp>=3.10",
+    "SQLAlchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "redis>=5.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "cryptography>=42.0",
+    "asyncssh>=2.14",
+    "dnspython>=2.6",
+    "httpx>=0.27",
+    "PyJWT[crypto]>=2.8",
+    "orjson>=3.10",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+    "aiosqlite>=0.20",
+    "ruff>=0.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+# Pinned explicitly: without a select list the effective rule set is whatever the installed
+# ruff happens to default to, so `ruff check` passing locally said nothing about CI.
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "BLE", "SIM", "RUF"]
+ignore = [
+    # The user-facing strings are Russian on purpose; Cyrillic is not a homoglyph typo here.
+    "RUF001", "RUF002", "RUF003",
+    "B008",    # FastAPI/aiogram-style calls in defaults are idiomatic here
+    "SIM105",  # contextlib.suppress is not clearer than try/except/pass in handlers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+# Embedded bash: wrapping these lines would change the script that actually runs.
+"app/services/deployment/scripts.py" = ["E501"]
+"migrations/versions/*" = ["E501", "I001"]
