@@ -219,7 +219,7 @@ class DeploymentService:
 
     def remnawave(self, context: DeployContext) -> RemnawaveClient:
         url, token = context.remnawave_credentials()
-        return RemnawaveClient(url, token)
+        return RemnawaveClient(url, token, api_version=context.remnawave_api_version)
 
     def yandex(self, context: DeployContext) -> YandexCloudClient:
         return YandexCloudClient(
@@ -390,6 +390,9 @@ class DeploymentService:
 
     async def _step_create_remnawave_profile(self, context: DeployContext) -> None:
         async with self.remnawave(context) as client:
+            # First step that talks to the panel, so it is the first to know which API major
+            # answered. Recording it means the remaining steps stop re-probing.
+            await self._remember_api_version(context, client)
             if not await client.health_check():
                 raise TransientError("Панель Remnawave недоступна")
             profile = await client.ensure_profile(PROFILE_NAME)
@@ -405,6 +408,19 @@ class DeploymentService:
             context.resources.inbound_tag = INBOUND_TAG
             context.remnawave.verified = True
             await self.session.flush()
+
+    async def _remember_api_version(self, context: DeployContext, client: RemnawaveClient) -> None:
+        """Store the dialect the panel turned out to speak, once."""
+        detected = str(client.version)
+        if detected == context.remnawave_api_version:
+            return
+        context.remnawave.api_version = detected
+        await self.session.flush()
+        await self.audit.log(
+            "remnawave.api_version",
+            order_id=context.order.id,
+            message=f"панель отвечает как {client.describe()}",
+        )
 
     async def _step_create_remnawave_node(self, context: DeployContext) -> None:
         box = secret_box()

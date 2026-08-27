@@ -30,6 +30,7 @@ from app.models.enums import OrderStatus, SSHAuthType, YandexAuthType
 from app.repositories import DeploymentRepository, InfraRepository, OrderRepository
 from app.services.dns import verify_a_record, verify_cname_record
 from app.services.queue import JobQueue
+from app.services.remnawave import RemnawaveClient
 from app.services.vault import purge_yandex_cookies, read_yandex_cookies, store_yandex_cookies
 from app.services.yandex import CookieJar, YandexCloudClient, build_auth, parse_cookies
 
@@ -122,8 +123,29 @@ async def panel_token(message: Message, state: FSMContext, session: AsyncSession
     row.api_token_enc = secret_box().encrypt(token)
     await message.delete()
     await message.answer(texts.SECRET_RECEIVED)
+    await _detect_panel_version(message, row, token)
     await state.set_state(CollectData.origin_ip)
     await message.answer(texts.ASK_ORIGIN_IP)
+
+
+async def _detect_panel_version(message: Message, row, token: str) -> None:
+    """Work out whether this panel speaks API v2 or v3, and remember the answer.
+
+    Best-effort on purpose: an unreachable panel is not a reason to abandon the order here.
+    The dialect is detected again when the deployment actually runs, and the customer just
+    learns sooner if their panel cannot be reached at all.
+    """
+    if not row.panel_url:
+        return
+    try:
+        async with RemnawaveClient(row.panel_url, token) as client:
+            row.api_version = str(client.version)
+            described = client.describe()
+    except Exception as exc:  # noqa: BLE001 — a failed probe must not block data collection
+        logger.info("Remnawave version probe failed for %s: %s", row.panel_url, exc)
+        await message.answer(texts.PANEL_VERSION_UNKNOWN.format(reason=str(exc)[:200]))
+        return
+    await message.answer(texts.PANEL_VERSION_DETECTED.format(version=described))
 
 
 # ------------------------------------------------------------------ Origin Server

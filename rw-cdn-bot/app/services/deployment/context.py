@@ -65,6 +65,20 @@ class DeployContext:
         token = box.decrypt(self.remnawave.api_token_enc) or ""
         return self.remnawave.panel_url or "", token
 
+    @property
+    def remnawave_api_version(self) -> str:
+        """Panel dialect for this order.
+
+        The value recorded when the panel was first reached wins. While that is still `auto`
+        the environment default applies, so an operator can pin every order at once when a
+        proxy in front of the panels eats the detection probe. `auto` at both levels means
+        detect on connect.
+        """
+        recorded = (self.remnawave.api_version or "auto").strip().lower()
+        if recorded and recorded != "auto":
+            return recorded
+        return (get_settings().remnawave_api_version or "auto").strip().lower() or "auto"
+
     def yandex_credentials(self) -> tuple[str, str]:
         """Legacy accessor: service account key + folder."""
         box = secret_box()

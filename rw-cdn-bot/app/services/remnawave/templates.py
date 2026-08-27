@@ -97,6 +97,11 @@ def build_profile_config() -> dict:
     }
 
 
+# Name of the xHTTP parameter block in a host payload. It is `xHttpExtraParams` on panel API
+# v2 and `xhttpExtraParams` on v3; callers pass the one their panel speaks (see dialects.py).
+DEFAULT_XHTTP_FIELD = "xHttpExtraParams"
+
+
 def build_host_payload(
     *,
     profile_uuid: str,
@@ -104,8 +109,13 @@ def build_host_payload(
     cdn_domain: str,
     node_uuid: str | None = None,
     remark: str = PROFILE_NAME,
+    xhttp_field: str = DEFAULT_XHTTP_FIELD,
 ) -> dict:
-    """Host clients actually connect to — points at the CDN domain, not the Yandex CNAME."""
+    """Host clients actually connect to — points at the CDN domain, not the Yandex CNAME.
+
+    Field names follow CreateHostRequestDto. `isHidden`, not `isHostHidden`: the latter is not
+    in either major's contract and a panel that rejects unknown properties answers 400.
+    """
     payload: dict = {
         "inbound": {"configProfileUuid": profile_uuid, "configProfileInboundUuid": inbound_uuid},
         "remark": remark,
@@ -119,9 +129,10 @@ def build_host_payload(
         "securityLayer": "TLS",
         "isDisabled": False,
         "overrideSniFromAddress": False,
-        "isHostHidden": False,
-        "xHttpExtraParams": dict(XHTTP_EXTRA),
+        "isHidden": False,
+        xhttp_field: dict(XHTTP_EXTRA),
     }
+    # Binding a host to a specific node is a v3 field; v2 has no such property.
     if node_uuid:
         payload["nodes"] = [node_uuid]
     return payload

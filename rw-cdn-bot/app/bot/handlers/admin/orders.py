@@ -112,6 +112,7 @@ async def order_card(message, session: AsyncSession, match) -> None:
     infra = InfraRepository(session)
     origin = await infra.origin(order_id)
     yandex = await infra.yandex(order_id)
+    remnawave = await infra.remnawave(order_id)
     resources = await infra.resources(order_id)
     deployment = await DeploymentRepository(session).get_by_order(order_id)
 
@@ -129,6 +130,12 @@ async def order_card(message, session: AsyncSession, match) -> None:
             f"Origin Domain: <code>{origin.origin_domain or '—'}</code>",
             f"CDN Domain: <code>{origin.cdn_domain or '—'}</code>",
             f"Origin Status: {origin.origin_status}",
+        ]
+    if remnawave:
+        lines += [
+            "",
+            f"Панель: <code>{remnawave.panel_url or '—'}</code>",
+            f"API панели: <code>{remnawave.api_version}</code>",
         ]
     if resources:
         lines += [

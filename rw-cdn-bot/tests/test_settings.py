@@ -118,3 +118,11 @@ def test_webhook_urls_are_built_from_the_base():
     settings = _settings(WEBHOOK_BASE_URL="https://bot.example.com/")
     assert settings.platega_webhook_url == "https://bot.example.com/webhooks/platega"
     assert settings.yookassa_webhook_url == "https://bot.example.com/webhooks/yookassa"
+
+
+def test_remnawave_api_version_defaults_to_auto():
+    assert _settings().remnawave_api_version == "auto"
+
+
+def test_remnawave_api_version_can_be_pinned():
+    assert _settings(REMNAWAVE_API_VERSION="v2").remnawave_api_version == "v2"

@@ -1,8 +1,14 @@
-"""Async Remnawave panel client.
+"""Async Remnawave panel client, speaking both panel API v2 and v3.
 
 Only documented endpoints are called (see endpoints.py). Every create operation is
 idempotent: it looks for an existing object by its natural key first, so a restarted worker
 reuses what is already there instead of duplicating profiles, nodes or hosts.
+
+**Two majors, one client.** The paths are the same in v2 and v3; the payload and response
+details that are not live in `dialects.py`. The version is detected once on connect from
+`GET /system/metadata` — an endpoint v3 has and v2 does not, so its absence is a positive
+answer rather than a guess — and can be pinned with `api_version="v2"` / `"v3"` when a panel
+sits behind something that mangles the probe.
 """
 from __future__ import annotations
 
@@ -18,11 +24,17 @@ from app.core.exceptions import (
 )
 from app.core.retry import retry_async
 from app.services.remnawave import endpoints as ep
+from app.services.remnawave.dialects import (
+    DEFAULT_VERSION,
+    ApiVersion,
+    Dialect,
+    dialect_for,
+    version_from_metadata,
+)
 from app.services.remnawave.templates import (
     INBOUND_TAG,
     NODE_PORT,
     PROFILE_NAME,
-    build_host_payload,
     build_profile_config,
 )
 
@@ -30,10 +42,32 @@ logger = logging.getLogger(__name__)
 
 
 def _unwrap(payload: Any) -> Any:
-    """Remnawave wraps successful bodies in {"response": ...}."""
+    """Remnawave wraps successful bodies in {"response": ...}. Unchanged between v2 and v3."""
     if isinstance(payload, dict) and "response" in payload:
         return payload["response"]
     return payload
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """The readable half of an error body.
+
+    Both majors answer with `{"message": ..., "errorCode": ..., "timestamp": ..., "path": ...}`
+    — v3 types those bodies per status but keeps the fields. Pulling the message out beats
+    showing an admin a wall of JSON; anything unrecognised falls back to the raw text.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return response.text[:1000]
+    if not isinstance(body, dict):
+        return response.text[:1000]
+    message = body.get("message") or body.get("error") or body.get("detail")
+    code = body.get("errorCode")
+    if isinstance(message, list):  # validation errors arrive as a list of strings
+        message = "; ".join(str(item) for item in message)
+    if not message:
+        return response.text[:1000]
+    return f"{message} [{code}]" if code else str(message)[:1000]
 
 
 class RemnawaveClient:
@@ -45,6 +79,7 @@ class RemnawaveClient:
         caddy_token: str | None = None,
         timeout: int = 45,
         verify_ssl: bool = True,
+        api_version: ApiVersion | str | None = ApiVersion.AUTO,
     ) -> None:
         base = base_url.rstrip("/")
         self.base_url = base if base.endswith("/api") else f"{base}/api"
@@ -54,6 +89,21 @@ class RemnawaveClient:
         self._verify = verify_ssl
         self._client: httpx.AsyncClient | None = None
 
+        self._pinned = (
+            api_version if isinstance(api_version, ApiVersion) else ApiVersion.parse(api_version)
+        )
+        self._version = self._pinned
+        self.panel_version: str | None = None  # the exact string the panel reported, if any
+
+    @property
+    def version(self) -> ApiVersion:
+        """The dialect in use. AUTO until the connection is opened and detection has run."""
+        return self._version
+
+    @property
+    def dialect(self) -> Dialect:
+        return dialect_for(self._version)
+
     async def __aenter__(self) -> RemnawaveClient:
         headers = {"Authorization": self._token, "Content-Type": "application/json"}
         if self._caddy_token:
@@ -61,14 +111,62 @@ class RemnawaveClient:
         self._client = httpx.AsyncClient(
             base_url=self.base_url, headers=headers, timeout=self._timeout, verify=self._verify
         )
+        if self._pinned is ApiVersion.AUTO:
+            try:
+                self._version = await self.detect_version()
+            except BaseException:
+                # __aexit__ never runs when __aenter__ raises, so the transport would be left
+                # open — a refused token would leak a connection per attempt.
+                await self.__aexit__(None, None, None)
+                raise
         return self
+
+    async def detect_version(self) -> ApiVersion:
+        """Ask the panel which major it is.
+
+        `GET /system/metadata` was added in v3 and returns the exact version string. A 404 is
+        the v2 answer — the endpoint is simply not there. Anything else (the panel is down, a
+        proxy in the way) leaves the dialect at the default rather than reading a version out
+        of an error, and the first real call reports the actual problem.
+        """
+        try:
+            data = await self._request("GET", ep.SYSTEM_METADATA, attempts=1)
+        except RemnawaveAPIError as exc:
+            if exc.status in (401, 403):
+                raise  # a refused token is not a version answer
+            logger.info("Remnawave version probe answered HTTP %s, assuming v2", exc.status)
+            return ApiVersion.V2
+        except TransientError:
+            logger.warning("Remnawave version probe failed, falling back to %s", DEFAULT_VERSION)
+            return DEFAULT_VERSION
+
+        if data is None:  # a 404 on a GET is normalised to None by _request
+            logger.info("Remnawave panel has no /system/metadata — treating it as v2")
+            return ApiVersion.V2
+
+        if isinstance(data, dict) and isinstance(data.get("version"), str):
+            self.panel_version = data["version"]
+        detected = version_from_metadata(data)
+        if detected is None or detected is ApiVersion.AUTO:
+            logger.warning(
+                "Remnawave reported an unrecognised version %r, using %s",
+                self.panel_version,
+                DEFAULT_VERSION,
+            )
+            return DEFAULT_VERSION
+        logger.info("Remnawave panel %s detected as %s", self.panel_version, detected)
+        return detected
+
+    def describe(self) -> str:
+        detail = f" {self.panel_version}" if self.panel_version else ""
+        return f"{self.dialect.describe()}{detail}"
 
     async def __aexit__(self, *exc_info: object) -> None:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
 
-    async def _request(self, method: str, path: str, **kwargs) -> Any:
+    async def _request(self, method: str, path: str, *, attempts: int = 3, **kwargs) -> Any:
         if self._client is None:
             raise RuntimeError("RemnawaveClient must be used as an async context manager")
 
@@ -88,12 +186,12 @@ class RemnawaveClient:
             if response.status_code == 404 and method.upper() == "GET":
                 return None
             if response.status_code >= 400:
-                raise RemnawaveAPIError(response.status_code, response.text, path)
+                raise RemnawaveAPIError(response.status_code, _error_detail(response), path)
             if not response.content:
                 return None
             return _unwrap(response.json())
 
-        return await retry_async(_call, attempts=3, label=f"remnawave {method} {path}")
+        return await retry_async(_call, attempts=attempts, label=f"remnawave {method} {path}")
 
     # ------------------------------------------------------------------ health
 
@@ -129,8 +227,9 @@ class RemnawaveClient:
         return await self._request("POST", ep.CONFIG_PROFILES, json=payload)
 
     async def update_profile(self, uuid: str, config: dict) -> dict:
+        # PATCH targets the collection in both majors; the uuid travels in the body.
         return await self._request(
-            "PATCH", ep.CONFIG_PROFILE.format(uuid=uuid), json={"uuid": uuid, "config": config}
+            "PATCH", ep.CONFIG_PROFILE_UPDATE, json={"uuid": uuid, "config": config}
         )
 
     async def delete_profile(self, uuid: str) -> None:
@@ -196,7 +295,7 @@ class RemnawaveClient:
         return await self._request("POST", ep.NODES, json=payload)
 
     async def update_node(self, uuid: str, **fields) -> dict:
-        return await self._request("PATCH", ep.NODE.format(uuid=uuid), json={"uuid": uuid, **fields})
+        return await self._request("PATCH", ep.NODE_UPDATE, json={"uuid": uuid, **fields})
 
     async def delete_node(self, uuid: str) -> None:
         await self._request("DELETE", ep.NODE.format(uuid=uuid))
@@ -227,7 +326,10 @@ class RemnawaveClient:
         This is the value that goes into the node's SECRET_KEY (older builds: SSL_CERT).
         It belongs to the panel, not to an individual node.
         """
-        for path in (ep.KEYGEN_PUB_KEY, ep.KEYGEN):
+        # v2 calls the field pubKey, v3 renamed it to secretKey — same endpoint, so both
+        # names are tried in the order this dialect expects them.
+        fields = (*self.dialect.keygen_fields, "publicKey", "certificate", "key")
+        for path in (ep.KEYGEN, ep.KEYGEN_PUB_KEY):
             try:
                 data = await self._request("GET", path)
             except RemnawaveAPIError as exc:
@@ -235,7 +337,7 @@ class RemnawaveClient:
                     continue
                 raise
             if isinstance(data, dict):
-                for key in ("secretKey", "pubKey", "publicKey", "certificate", "key"):
+                for key in fields:
                     value = data.get(key)
                     if value:
                         return str(value).strip()
@@ -291,7 +393,7 @@ class RemnawaveClient:
     async def create_host(
         self, *, profile_uuid: str, inbound_uuid: str, cdn_domain: str, node_uuid: str | None = None
     ) -> dict:
-        payload = build_host_payload(
+        payload = self.dialect.host_payload(
             profile_uuid=profile_uuid,
             inbound_uuid=inbound_uuid,
             cdn_domain=cdn_domain,
@@ -300,7 +402,7 @@ class RemnawaveClient:
         return await self._request("POST", ep.HOSTS, json=payload)
 
     async def update_host(self, uuid: str, **fields) -> dict:
-        return await self._request("PATCH", ep.HOST.format(uuid=uuid), json={"uuid": uuid, **fields})
+        return await self._request("PATCH", ep.HOST_UPDATE, json={"uuid": uuid, **fields})
 
     async def delete_host(self, uuid: str) -> None:
         await self._request("DELETE", ep.HOST.format(uuid=uuid))
@@ -341,7 +443,7 @@ class RemnawaveClient:
                 continue
             await self._request(
                 "PATCH",
-                ep.INTERNAL_SQUAD.format(uuid=uuid),
+                ep.INTERNAL_SQUAD_UPDATE,
                 json={"uuid": uuid, "inbounds": [*current, inbound_uuid]},
             )
             updated += 1

@@ -82,6 +82,10 @@ ASK_CLOUDFLARE_TOKEN = "Отправьте API-токен Cloudflare с прав
 
 DATA_SAVED = "✅ Данные сохранены. Запускаю настройку…"
 SECRET_RECEIVED = "🔒 Принято и зашифровано."
+PANEL_VERSION_DETECTED = "🧩 Панель определена: {version}."
+PANEL_VERSION_UNKNOWN = (
+    "🧩 Версию панели определить не удалось ({reason}) — она будет определена при настройке."
+)
 
 MANUAL_DNS = (
     "☁️ <b>Нужна DNS-запись</b>\n\n"

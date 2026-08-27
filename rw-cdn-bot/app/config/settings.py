@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     # Remnawave defaults (per-order values always win)
     remnawave_default_url: str = ""
     remnawave_api_token: str = ""
+    # Panel API major: "auto" (detect on connect), "v2" or "v3". Only a fallback — the value
+    # recorded per order in remnawave_instances.api_version wins.
+    remnawave_api_version: str = "auto"
 
     # Yandex Cloud defaults (per-order values always win)
     yandex_cloud_id: str = ""

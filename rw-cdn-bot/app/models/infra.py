@@ -53,6 +53,12 @@ class RemnawaveInstance(IntPK, TimestampMixin, Base):
     api_token_enc: Mapped[str | None] = mapped_column(Text)
     caddy_token_enc: Mapped[str | None] = mapped_column(Text)
     verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Panel API dialect: "auto" (detect on connect), "v2" or "v3". Recorded when the panel is
+    # first reached so the worker does not re-probe, and pinnable when a proxy in front of the
+    # panel swallows the probe.
+    api_version: Mapped[str] = mapped_column(
+        String(16), default="auto", server_default="auto", nullable=False
+    )
 
 
 class RemnawaveResource(IntPK, TimestampMixin, Base):

@@ -55,3 +55,62 @@ def test_cookies_are_dropped_only_after_the_last_step_that_can_need_yandex():
     assert "_forget_cookies" in source
     assert "_forget_cookies" not in inspect.getsource(DeploymentService._step_get_yandex_cname)
     assert S.STEP_ORDER.index(S.CONFIGURE_DNS) > S.STEP_ORDER.index(S.GET_YANDEX_CNAME)
+
+
+async def test_remnawave_api_version_defaults_to_auto(session):
+    """A fresh order has no recorded dialect, so the client detects one on connect."""
+    from app.repositories import InfraRepository
+
+    row = await InfraRepository(session).remnawave_or_create(order_id=1)
+    await session.flush()
+    assert row.api_version == "auto"
+
+
+async def test_a_recorded_api_version_reaches_the_client(session, seeded):
+    """Once the panel has answered, the worker stops re-probing on every step."""
+    from unittest.mock import MagicMock
+
+    from app.services.deployment.context import DeployContext
+    from app.services.remnawave.dialects import ApiVersion
+
+    remnawave = MagicMock()
+    remnawave.api_version = "v2"
+    remnawave.panel_url = "https://panel.example.com"
+    remnawave.api_token_enc = None
+
+    context = DeployContext(
+        order=seeded["order"],
+        deployment=MagicMock(),
+        origin=MagicMock(),
+        remnawave=remnawave,
+        resources=MagicMock(),
+        yandex=MagicMock(),
+    )
+    assert context.remnawave_api_version == "v2"
+
+    from app.services.remnawave import RemnawaveClient
+
+    client = RemnawaveClient("https://panel.example.com", "t", api_version=context.remnawave_api_version)
+    assert client.version is ApiVersion.V2
+
+
+def test_the_env_default_applies_only_while_the_order_says_auto(monkeypatch):
+    """A recorded dialect always wins over the environment fallback."""
+    from unittest.mock import MagicMock
+
+    from app.config import get_settings
+    from app.services.deployment.context import DeployContext
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "remnawave_api_version", "v2", raising=False)
+
+    def context_with(recorded: str) -> DeployContext:
+        remnawave = MagicMock()
+        remnawave.api_version = recorded
+        return DeployContext(
+            order=MagicMock(), deployment=MagicMock(), origin=MagicMock(),
+            remnawave=remnawave, resources=MagicMock(), yandex=MagicMock(),
+        )
+
+    assert context_with("auto").remnawave_api_version == "v2"   # env fallback
+    assert context_with("v3").remnawave_api_version == "v3"     # recorded wins
