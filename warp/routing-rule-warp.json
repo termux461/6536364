@@ -1,0 +1,12 @@
+{
+  "type": "field",
+  "outboundTag": "warp",
+  "domain": [
+    "geosite:openai",
+    "domain:chatgpt.com",
+    "domain:oaistatic.com",
+    "domain:spotify.com",
+    "domain:scdn.co",
+    "geosite:netflix"
+  ]
+}

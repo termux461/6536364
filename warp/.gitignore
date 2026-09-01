@@ -1,0 +1,5 @@
+wgcf-account.toml
+wgcf-account.toml.bak.*
+wgcf-profile.conf
+outbound-warp.json
+*.bak.*
